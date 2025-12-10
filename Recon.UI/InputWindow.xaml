@@ -1,0 +1,41 @@
+﻿<Window x:Class="Recon.UI.InputWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Введення тексту" 
+        Height="250" Width="450"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"> 
+    
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="PromptTextBlock" 
+                   Text="Введіть повідомлення для користувачів:" 
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,10"/>
+
+        <TextBox x:Name="ResponseTextBox" 
+                 Grid.Row="1"
+                 AcceptsReturn="True" 
+                 TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto"
+                 Padding="5"
+                 Margin="0,0,0,15"/>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Скасувати" 
+                    Width="80" Height="25" 
+                    IsCancel="True"
+                    Margin="0,0,10,0"/> 
+            <Button Content="ОК" 
+                    Width="80" Height="25" 
+                    IsDefault="True" 
+                    Click="OkButton_Click"/> 
+        </StackPanel>
+    </Grid>
+</Window>

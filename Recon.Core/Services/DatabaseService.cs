@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Recon.Core.Interfaces;
@@ -54,6 +55,35 @@ public class DatabaseService : IDatabaseService
         {
             _logger.LogError(ex, "Ошибка при поиске пользователя {Login}", username);
             throw;
+        }
+    }
+
+    public List<string> GetActiveUserEmails()
+    {
+        if (string.IsNullOrEmpty(_connectionString))
+        {
+            _logger.LogError("Попытка запроса к БД без инициализации строки подключения. (GetUserByLogin)");
+            return null;
+        }
+
+        try
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                string sql = @"
+                SELECT 
+                    login AS Username
+                FROM users";
+                
+                var users = connection.Query<string>(sql).ToList();
+                
+                return users;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ошибка при сборе почт всех активных пользователей");
+            return new List<string>();
         }
     }
 
@@ -141,7 +171,10 @@ public class DatabaseService : IDatabaseService
                     return new T();
                 }
 
-                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var options = new JsonSerializerOptions {
+                    PropertyNameCaseInsensitive = true, 
+                    NumberHandling = JsonNumberHandling.AllowReadingFromString 
+                };
                 var config = JsonSerializer.Deserialize<T>(jsonString, options);
                 
                 return config?? new T();

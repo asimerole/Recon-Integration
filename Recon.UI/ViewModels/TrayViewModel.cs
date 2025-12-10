@@ -146,9 +146,26 @@ public partial class TrayViewModel : ObservableObject
     }
     
     [RelayCommand]
-    private void NotifyAll()
+    private async Task NotifyAll()
     {
+        string message = ShowInputDialog("Введіть повідомлення для користувачів:");
         
+        if (string.IsNullOrWhiteSpace(message)) return;
+        
+        var users = _dbService.GetActiveUserEmails();
+        
+        if (users.Count == 0)
+        {
+            MessageBox.Show("Немає активних користувачів для розсилки.");
+            return;
+        }
+        
+        await Task.Run(async () =>
+        {
+            await _mailService.SendToAllAsync(users, "Важливе повідомлення", message);
+        });
+        
+        MessageBox.Show("Розсилка завершена!"); 
     }
     
     [RelayCommand]
@@ -199,6 +216,20 @@ public partial class TrayViewModel : ObservableObject
         };
 
         _dbService.SaveModuleConfig(config);
+    }
+    
+    private string ShowInputDialog(string prompt)
+    {
+        var inputWindow = new InputWindow(prompt);
+        
+        bool? result = inputWindow.ShowDialog();
+
+        if (result == true)
+        {
+            return inputWindow.ResponseText;
+        }
+
+        return string.Empty; 
     }
     
     partial void OnIsFtpActiveChanged(bool value) => SaveCurrentState();
