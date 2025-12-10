@@ -28,4 +28,6 @@ public interface IDatabaseService
     Task RebuildDatabaseAsync();
     
     Task UpdateDailyStatAsync(int serverID, string column);
+    
+    List<string> GetActiveUserEmails();
 }

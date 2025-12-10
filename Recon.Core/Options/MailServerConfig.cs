@@ -1,26 +1,28 @@
 ﻿using System.Text.Json.Serialization;
+using Recon.Core.Converters;
 
 namespace Recon.Core.Options;
 
 public class MailServerConfig
 {
     [JsonPropertyName("SMTP server")]
-    public int SmtpServer { get; set; }
+    public string SmtpServer { get; set; }
     
     [JsonPropertyName("auth")]
-    public bool Auth { get; set; } = false;
+    public bool UseAuth { get; set; } = false;
     
     [JsonPropertyName("email_sender")]
     public string EmailSender { get; set; } = string.Empty;
     
     [JsonPropertyName("name_sender")]
-    public string NameSender { get; set; } = string.Empty;
+    public string NameSender { get; set; } = "Recon Service";
     
     [JsonPropertyName("ssl")]
-    public bool Ssl { get; set; } = false;
-    
-    [JsonPropertyName("port")]
-    public int Port { get; set; } = 0;
+    public bool UseSsl { get; set; } = false;
+
+    [JsonPropertyName("port")] 
+    [JsonConverter(typeof(JsonIntStringConverter))] 
+    public int Port { get; set; } = 25;
     
     [JsonPropertyName("login")]
     public string AuthLogin { get; set; } = string.Empty;
