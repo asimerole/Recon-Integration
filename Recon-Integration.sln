@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Recon.Core", "Recon.Core\Recon.Core.csproj", "{A259A09F-BB67-4BF8-9906-E6D668A0C040}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Recon.UI", "Recon.UI\Recon.UI.csproj", "{C2A38DBC-5908-4C7D-95BD-3A03A30CDE9E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A259A09F-BB67-4BF8-9906-E6D668A0C040}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A259A09F-BB67-4BF8-9906-E6D668A0C040}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A259A09F-BB67-4BF8-9906-E6D668A0C040}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A259A09F-BB67-4BF8-9906-E6D668A0C040}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C2A38DBC-5908-4C7D-95BD-3A03A30CDE9E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2A38DBC-5908-4C7D-95BD-3A03A30CDE9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2A38DBC-5908-4C7D-95BD-3A03A30CDE9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2A38DBC-5908-4C7D-95BD-3A03A30CDE9E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,50 @@
+﻿<Application x:Class="Recon.UI.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Recon.UI"
+             xmlns:tb="http://www.hardcodet.net/taskbar"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        
+        <tb:TaskbarIcon x:Key="MyTrayIcon"
+                        ToolTipText="Recon Integration"
+                        IconSource="/Assets/Icons/icon.ico"> 
+            <tb:TaskbarIcon.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="{Binding Version}" IsEnabled="False"/>
+                    
+                    <MenuItem Header="{Binding Progress}" IsEnabled="False"/>
+                    
+                    <MenuItem Header="Повідомити всіх" 
+                              Command="{Binding NotifyAllCommand}" />
+                    
+                    <Separator/>
+                    
+                    <MenuItem Header="OneDrive - ввимк/вимк" 
+                              IsChecked="{Binding IsOneDriveActive, Mode=TwoWay}"
+                              Command="{Binding ChangeOneDriveStatusCommand}" />
+                    
+                    <MenuItem Header="Поштова розсилка - ввимк/вимк" 
+                              IsChecked="{Binding IsMailActive, Mode=TwoWay}"
+                              Command="{Binding ChangeMailStatusCommand}" />
+                    
+                    <MenuItem Header="Сбір - ввимк/вимк" 
+                              IsChecked="{Binding IsFtpActive, Mode=TwoWay}"
+                              Command="{Binding ChangeFtpStatusCommand}" />
+                    
+                    <MenuItem Header="Інтеграція в БД - ввимк/вимк" 
+                              IsChecked="{Binding IsIntegrationActive, Mode=TwoWay}"
+                              Command="{Binding ChangeIntegrationStatusCommand}" />
+                    
+                    <MenuItem Header="Повторна збірка" 
+                              Command="{Binding RebuildDatabaseAsync}" />
+                    
+                    <MenuItem Header="Вихід" 
+                              Command="{Binding ExitCommand}" />
+                    
+                </ContextMenu>
+            </tb:TaskbarIcon.ContextMenu>
+        </tb:TaskbarIcon>
+
+    </Application.Resources>
+</Application>

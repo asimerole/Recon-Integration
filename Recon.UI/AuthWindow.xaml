@@ -1,0 +1,41 @@
+﻿<Window x:Class="Recon.UI.AuthWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Recon.UI"
+        mc:Ignorable="d"
+        Title="Авторизація (Recon-Integration)" Height="340" Width="400"
+        Icon="/Assets/Icons/icon.ico"
+        WindowStartupLocation="CenterScreen">
+    <StackPanel Margin="20" VerticalAlignment="Top">
+        <TextBlock Text="Логін:" Margin="0,0,0,5"/>
+        <TextBox x:Name="LoginBox" Height="25"  Width="200" Margin="0,0,0,10" HorizontalAlignment="Left"/>
+
+        <TextBlock Text="Пароль:" Margin="0,0,0,5"/>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid Width="200" Margin="0,0,0,10">
+                <PasswordBox x:Name="HiddenPasswordBox" 
+                             Height="25"
+                             PasswordChar="●"/>
+
+                <TextBox x:Name="VisiblePasswordBox" 
+                         Height="25" 
+                         Visibility="Collapsed"/>
+            </Grid>
+            <CheckBox Grid.Column="1" x:Name="ShowPasswordCheck" VerticalAlignment="Center" Margin="10, 0, 0, 10" Content="Показати" Width="100" Click="ShowPasswordCheck_OnClick"/>
+        </Grid>
+        
+        <CheckBox x:Name="SaveParamsToRegistryCheck" VerticalAlignment="Center" Margin="0, 0, 0, 10" Content="Запам'ятати параметри"/>
+        
+        <TextBlock Text="Виберіть конфіг:" Margin="0,0,0,10"/>
+        <ComboBox x:Name="ConfigComboBox" Margin="0,0,0,20" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+            <Button Content="Увійти" Width="100" Height="30" Click="LoginButton_Click" IsDefault="True"/> 
+        </StackPanel>
+    </StackPanel>
+</Window>

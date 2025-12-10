@@ -1,0 +1,40 @@
+﻿## Visual Studio ##
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# --- JetBrains / Rider / ReSharper ---
+.idea/
+*.sln.DotSettings.user
+*.suo
+*.user
+
+## Build results ##
+[Bb]in/
+[Oo]bj/
+x64/
+x86/
+
+## Logs (Serilog) ##
+logs/
+*.log
+
+# Keys
+Secrets.cs
+**/Secrets.cs
+
+## Configs ##
+*.conf
+*.meta
+Recon.UI/config.json 
+appsettings.json    
+
+## Temporary files ##
+*.tmp
+*.lock_meta
+
+## Windows thumbnail cache ##
+Thumbs.db
+ehthumbs.db
