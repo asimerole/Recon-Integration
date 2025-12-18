@@ -14,4 +14,10 @@
       <PackageReference Include="MimeKit" Version="4.14.0" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Reference Include="PresentationFramework">
+        <HintPath>..\..\..\..\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App\8.0.20\PresentationFramework.dll</HintPath>
+      </Reference>
+    </ItemGroup>
+
 </Project>

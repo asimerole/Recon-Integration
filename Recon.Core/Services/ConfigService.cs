@@ -2,7 +2,8 @@
 using Microsoft.Extensions.Logging;
 using Recon.Core.Interfaces;
 using Recon.Core.Options;
-using System.Text.Json; 
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Recon.Core.Services;
 
@@ -28,48 +29,65 @@ public class ConfigService : IConfigService
         var options = new DatabaseOptions();
         var builder = new SqlConnectionStringBuilder();
         
-        var lines = json.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var line in lines)
+    
+        // This pattern searches for: 
+        // 1. Any known keyword (server, database, etc.)
+        // 2. An equal sign
+        // 3. The value until the end of the line (or until a semicolon)
+        string pattern = @"(?<key>server|data source|address|database|initial catalog|user id|username|user|uid|password|pwd|port)\s*=\s*(?<value>[^;\r\n]+)";
+        var matches = Regex.Matches(json, pattern, RegexOptions.IgnoreCase);
+
+        foreach (Match match in matches)
         {
-            if (!line.Contains("=")) continue;
+            string key = match.Groups["key"].Value.ToLowerInvariant();
+            string value = match.Groups["value"].Value.Trim().Trim('"', '\''); 
 
-            var parts = line.Split('=', 2);
-            if (parts.Length != 2) continue;
+            _logger.LogInformation($"Найдено: {key} = {value}");
 
-            var key = parts[0].Trim();
-            var value = parts[1].Trim();
-            
-            switch (key) 
+            switch (key)
             {
-                case "server": options.Server = value; break;
-                case "database": options.Name = value; break;
-                case "username": options.Username = value; break;
-                case "password": options.Password = value; break;
-                case "port": 
-                    if (int.TryParse(value, out int parsedPort))
-                    {
-                        options.Port = parsedPort;
-                    }
-                    else 
-                    {
-                        _logger.LogWarning($"Warning: Invalid port value '{value}'");
-                    }
+                case "server":
+                case "data source":
+                case "address":
+                    options.Server = value;
+                    break;
+
+                case "database":
+                case "initial catalog":
+                    options.Name = value;
+                    break;
+
+                case "username":
+                case "user id":
+                case "user":
+                case "uid":
+                    options.Username = value;
+                    break;
+
+                case "password":
+                case "pwd":
+                    options.Password = value;
+                    break;
+
+                case "port":
+                    if (int.TryParse(value, out int parsedPort)) options.Port = parsedPort;
                     break;
             }
         }
         
         builder.DataSource = options.Port > 0 ? $"{options.Server},{options.Port}" : options.Server;
         
-        builder.DataSource = options.Server;
         builder.InitialCatalog = options.Name;
         builder.UserID = options.Username;
         builder.Password = options.Password;
             
         builder.MultiSubnetFailover = true;
-        builder.TrustServerCertificate = true;
+        builder.TrustServerCertificate = false;
         builder.Encrypt = false;    
-        builder.ConnectTimeout = options.CommandTimeout;
+        builder.ConnectTimeout = options.CommandTimeout > 0 ? options.CommandTimeout : 30;
         options.ConnectionString = builder.ConnectionString;
+        
+        //_logger.LogInformation($"Сформирована строка подключения: DataSource={builder.DataSource}; Catalog={builder.InitialCatalog}; User={builder.UserID}");
         
         return options;
     }

@@ -59,8 +59,8 @@ public partial class AuthWindow : Window
                     SaveParamsToRegistry(login, password);
                 }
                 IsAuthenticated = true;
-                this.DialogResult = true;
-                this.Close();
+                DialogResult = true;
+                Close();
             }
         }
         else
@@ -131,9 +131,12 @@ public partial class AuthWindow : Window
                     
                     key.SetValue("LastUsedPassword", Convert.ToBase64String(encrypted));
                 }
+                else
+                {
+                    key.DeleteValue("LastUsedPassword", throwOnMissingValue: false);
+                }
             }
         }
-        
     }
     
     public (string Login, string Password) LoadParamsFromRegistry()

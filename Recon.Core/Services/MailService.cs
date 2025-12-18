@@ -91,9 +91,9 @@ public class MailService : IMailService
         }
     }
 
-    public async Task SendEmailAsync(string toEmail, string subject, string body)
+    public async Task SendEmailAsync(string toEmail, string subject, string body, IEnumerable<string>? attachments = null)
     {
-        await SendToAllAsync(new[] { toEmail }, subject, body);
+        await SendToAllAsync(new[] { toEmail }, subject, body, attachments);
     }
 
     private void AddAttachments(BodyBuilder bodyBuilder, IEnumerable<string>? attachments)

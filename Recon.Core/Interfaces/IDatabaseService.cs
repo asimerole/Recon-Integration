@@ -7,10 +7,6 @@ public interface IDatabaseService
 {
     void Initialize(string dbOptionsConnectionString);
     User? GetUserByLogin(string username);
-    
-    string GetRootFolder();
-
-    int GetFeedingTime();
 
     Task UpdateServerStatusAsync(int reconId, DateTime? lastPing = null, DateTime? lastRecon = null,
         DateTime? lastDaily = null);
@@ -20,6 +16,12 @@ public interface IDatabaseService
     ModuleConfig GetModuleConfig();
     
     MailServerConfig GetMailServerConfig();
+
+    int GetFeedingTime();
+
+    string GetRootFolder();
+
+    string GetWinrecPath();
     
     void SaveModuleConfig(ModuleConfig config);
 
@@ -30,4 +32,10 @@ public interface IDatabaseService
     Task UpdateDailyStatAsync(int serverID, string column);
     
     List<string> GetActiveUserEmails();
+    
+    Task EnsureStructureExistsAsync(string unitName, string substationName, string objectName, int reconNumber, string objectFolderPath);
+    
+    Task InsertBatchAsync(List<FilePair> globalBatch);
+
+    Task<string?> GetTargetFolderByReconIdAsync(int reconId);
 }
