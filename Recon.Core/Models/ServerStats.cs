@@ -1,6 +1,6 @@
 ﻿namespace Recon.Core.Models;
 
-public class ServerStats
+public struct ServerStats
 {
     public int DailyCollected { get; set; }
     public int DailyEmailed { get; set; }

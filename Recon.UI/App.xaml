@@ -13,7 +13,8 @@
                 <ContextMenu>
                     <MenuItem Header="{Binding Version}" IsEnabled="False"/>
                     
-                    <MenuItem Header="{Binding Progress}" IsEnabled="False"/>
+                    <MenuItem Header="{Binding Progress, StringFormat='Інтеграція: {0}%'}" 
+                              IsEnabled="False"/>
                     
                     <MenuItem Header="Повідомити всіх" 
                               Command="{Binding NotifyAllCommand}" />
@@ -21,26 +22,26 @@
                     <Separator/>
                     
                     <MenuItem Header="OneDrive - ввимк/вимк" 
-                              IsChecked="{Binding IsOneDriveActive, Mode=TwoWay}"
-                              Command="{Binding ChangeOneDriveStatusCommand}" />
+                              IsCheckable="True"
+                              IsChecked="{Binding IsOneDriveActive, Mode=TwoWay}"/>
                     
                     <MenuItem Header="Поштова розсилка - ввимк/вимк" 
-                              IsChecked="{Binding IsMailActive, Mode=TwoWay}"
-                              Command="{Binding ChangeMailStatusCommand}" />
+                              IsCheckable="True"
+                              IsChecked="{Binding IsMailActive, Mode=TwoWay}"/>
                     
                     <MenuItem Header="Сбір - ввимк/вимк" 
-                              IsChecked="{Binding IsFtpActive, Mode=TwoWay}"
-                              Command="{Binding ChangeFtpStatusCommand}" />
+                              IsCheckable="True"
+                              IsChecked="{Binding IsFtpActive, Mode=TwoWay}"/>
                     
                     <MenuItem Header="Інтеграція в БД - ввимк/вимк" 
-                              IsChecked="{Binding IsIntegrationActive, Mode=TwoWay}"
-                              Command="{Binding ChangeIntegrationStatusCommand}" />
+                              IsCheckable="True"
+                              IsChecked="{Binding IsIntegrationActive, Mode=TwoWay}" />
                     
                     <MenuItem Header="Повторна збірка" 
-                              Command="{Binding RebuildDatabaseAsync}" />
+                              Command="{Binding RebuildDatabaseCommand}" />
                     
                     <MenuItem Header="Вихід" 
-                              Command="{Binding ExitCommand}" />
+                              Command="{Binding ExitAppCommand}" />
                     
                 </ContextMenu>
             </tb:TaskbarIcon.ContextMenu>

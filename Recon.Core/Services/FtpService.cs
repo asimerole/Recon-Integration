@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Recon.Core.Enums;
 using Recon.Core.Interfaces;
 using Recon.Core.Models;
 using Recon.Core.Options;
@@ -13,22 +14,22 @@ public class FtpService : IFtpService
 {
     private readonly IDatabaseService _dbService;
     private readonly ILogger<FtpService> _logger;
-    private readonly IConfigService _configService;
     private readonly IOneDriveService _oneDriveService;
+    private readonly IStatisticsService _statsService;
     
     private string _ftpCacheDir;
     private OneDriveConfig _oneDriveConfig;
     private bool _isOneDriveActive;
     
-    // Токен отмены (наш "рубильник")
+    // Cancel token (our “kill switch”)
     private CancellationTokenSource? _cts;
     private Task? _workingTask;
 
-    public FtpService(IDatabaseService dbService, ILogger<FtpService> logger, IConfigService configService, IOneDriveService oneDriveService)
+    public FtpService(IDatabaseService dbService, ILogger<FtpService> logger, IOneDriveService oneDriveService, IStatisticsService statsService)
     {
+        _statsService = statsService;
         _dbService = dbService;
         _logger = logger;
-        _configService = configService;
         _oneDriveService = oneDriveService;
     }
     
@@ -236,6 +237,8 @@ public class FtpService : IFtpService
                     lastDaily: updateDailyTime     
                 );
                 
+                _statsService.RegisterAction(ServiceType.Ftp, 1);
+                
                 if (_isOneDriveActive)
                 {
                     try
@@ -244,6 +247,7 @@ public class FtpService : IFtpService
                         relativePath = Path.Combine(relativePath, item.Name);
                         _oneDriveService.CopyToOneDrive(tempLocalPath, relativePath);
                         await _dbService.UpdateDailyStatAsync(server.Id, "uploaded");
+                        _statsService.RegisterAction(ServiceType.OneDrive, 1);
                     }
                     catch (IOException ioEx)
                     {

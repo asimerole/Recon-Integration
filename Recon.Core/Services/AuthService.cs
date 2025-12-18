@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Windows;
 using Recon.Core.Interfaces;
 using Recon.Core.Options;
 
@@ -18,16 +19,19 @@ public class AuthService : IAuthService
         _dbService.Initialize(dbOptions.ConnectionString);
         
         var user = _dbService.GetUserByLogin(username);
-        
-        var cryptoService = new CryptoService();
-        var hashedPassword = cryptoService.SHA512(password);
 
-        if (hashedPassword == user!.PasswordHash.ToUpper())
+        if (user != null)
         {
-            return true;
+            var cryptoService = new CryptoService();
+            var hashedPassword = cryptoService.SHA512(password);
+
+            if (hashedPassword == user.PasswordHash.ToUpper())
+            {
+                return true;
+            }
         }
         
-        
+        MessageBox.Show("Користувача не було знайдено.","Увага!");
         return false;
     }
 }

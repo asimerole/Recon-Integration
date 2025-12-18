@@ -3,7 +3,7 @@
 public interface IMailService
 {
     // Sending one letter
-    Task SendEmailAsync(string toEmail, string subject, string body);
+    Task SendEmailAsync(string toEmail, string subject, string body, IEnumerable<string>? attachments = null);
     
     // Mass mailing (for the “Notify everyone” function)
     Task SendToAllAsync(IEnumerable<string> recipients, string subject, string body, IEnumerable<string>? attachments = null);

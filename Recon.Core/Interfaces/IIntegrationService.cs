@@ -2,5 +2,9 @@
 
 public interface IIntegrationService
 {
-    public string GetIntegrationPercentage();
+    void StartIntegration(IProgress<int> progress = null);
+    
+    void StopIntegration();
+    
+    void SetFastBuild(bool isFastBuild);
 }

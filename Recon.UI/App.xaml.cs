@@ -41,11 +41,23 @@ public partial class App : Application
             .WriteTo.Logger(l => l
                 .Filter.ByIncludingOnly(Matching.FromSource<DatabaseService>())
                 .WriteTo.File("logs/database-.log", rollingInterval: RollingInterval.Day))
+            
+            // --- Фильтр для Интеграции ---
+            .WriteTo.Logger(l => l
+                .Filter.ByIncludingOnly(Matching.FromSource<IntegrationService>())
+                .WriteTo.File("logs/integration-.log", rollingInterval: RollingInterval.Day))
+            
+            // --- Фильтр для OneDrive ---
+            .WriteTo.Logger(l => l
+                .Filter.ByIncludingOnly(Matching.FromSource<OneDriveService>())
+                .WriteTo.File("logs/onedrive-.log", rollingInterval: RollingInterval.Day))
 
             // --- Общий лог (всё остальное + системные ошибки) ---
             // Исключаем то, что уже записали в спец. файлы, чтобы не дублировать (опционально)
             .WriteTo.File("logs/general-.log", rollingInterval: RollingInterval.Day)
             .CreateLogger();
+        
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         
         _host = Host.CreateDefaultBuilder()
             .UseSerilog()
@@ -60,8 +72,10 @@ public partial class App : Application
                 services.AddSingleton<ICryptoService, CryptoService>();
                 services.AddSingleton<IDatabaseService, DatabaseService>();
                 services.AddSingleton<IConfigService, ConfigService>();
+                services.AddSingleton<ConfigMonitorService>();
+                services.AddSingleton<IStatisticsService, StatisticsService>();
                 
-                // Твои Окна (View)
+                // Окна (View)
                 services.AddTransient<AuthWindow>();        // WPF Window
                 services.AddSingleton<TrayViewModel>();     // ViewModels logic
             })
@@ -70,21 +84,45 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
-        await _host.StartAsync();
-
-        // Показываем окно авторизации через DI
-        var authWindow = _host.Services.GetRequiredService<AuthWindow>();
-        bool? result = authWindow.ShowDialog();
-
-        if (result == true)
+        try
         {
+            await _host.StartAsync();
             
-            // Если вошли — инициализируем трей (через ViewModel или сервис)
-            InitializeTrayIcon();
+            var authWindow = _host.Services.GetRequiredService<AuthWindow>();
+            bool? result = authWindow.ShowDialog();
+
+            if (result == true)
+            {
+                InitializeTrayIcon();
+            }
+            else
+            {
+                await _host.StopAsync();
+                Shutdown();
+            }
         }
-        else
+        catch (Microsoft.Data.SqlClient.SqlException ex)
         {
-            await _host.StopAsync(); 
+            Log.Error(ex, "Критическая ошибка подключения к БД при запуске.");
+            
+            MessageBox.Show(
+                $"Не удалось подключиться к базе данных.\n\nПроверьте:\n1. Доступен ли сервер (VPN/Сеть).\n2. Открыт ли порт.\n\nДетали ошибки:\n{ex.Message}", 
+                "Ошибка подключения", 
+                MessageBoxButton.OK, 
+                MessageBoxImage.Error);
+            
+            Shutdown();
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "Необработанное исключение при запуске приложения.");
+        
+            MessageBox.Show(
+                $"Критическая ошибка при запуске:\n{ex.Message}", 
+                "Ошибка приложения", 
+                MessageBoxButton.OK, 
+                MessageBoxImage.Error);
+
             Shutdown();
         }
     }

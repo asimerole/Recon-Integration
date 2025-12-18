@@ -5,7 +5,8 @@
         Height="250" Width="450"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
-        ShowInTaskbar="False"> 
+        ShowInTaskbar="False"
+        Icon="/Assets/Icons/icon.ico"> 
     
     <Grid Margin="15">
         <Grid.RowDefinitions>
