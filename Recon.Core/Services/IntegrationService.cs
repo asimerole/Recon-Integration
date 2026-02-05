@@ -14,6 +14,7 @@ public class IntegrationService : IIntegrationService
     private readonly ILogger<IIntegrationService> _logger;
     private readonly BrokenFileService _brokenFileService;
     private readonly IStatisticsService _statsService;
+    private readonly IMailService _mailService;
     
     private static readonly HashSet<string> IgnoredExtensions = new (StringComparer.OrdinalIgnoreCase)
     {
@@ -29,11 +30,12 @@ public class IntegrationService : IIntegrationService
     private CancellationTokenSource? _cts;
     private Task? _workingTask;
 
-    public IntegrationService(IDatabaseService databaseService, ILogger<IIntegrationService> logger, IStatisticsService statisticsService)
+    public IntegrationService(IDatabaseService databaseService, ILogger<IIntegrationService> logger, IStatisticsService statisticsService, IMailService mailService)
     {
         _brokenFileService = new BrokenFileService(logger);
         _statsService = statisticsService;
         _databaseService = databaseService;
+        _mailService = mailService;
         _logger = logger;
     }
     
@@ -46,12 +48,39 @@ public class IntegrationService : IIntegrationService
         _workingTask = Task.Run(() => WorkerLoop(_cts.Token, progress));
     }
 
-    public void StopIntegration()
-    {
+    public async Task StopIntegration()
+    { 
         if (_cts == null) return;
-        
-        _cts.Cancel(); 
-        _cts = null;
+
+        try
+        {
+            await _cts.CancelAsync(); 
+
+            if (_workingTask != null)
+            {
+                var timeout = Task.Delay(3000);
+                var task = await Task.WhenAny(_workingTask, timeout);
+            
+                if (task == timeout)
+                {
+                    // Якщо не встиг зупинитися - просто кидаємо його
+                    // Але обов'язково обнуляємо посилання нижче!
+                }
+                else
+                {
+                    await _workingTask; 
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            _cts?.Dispose();
+            _cts = null;
+            _workingTask = null; 
+        }
     }
     
     public string GetIntegrationPercentage()
@@ -74,13 +103,13 @@ public class IntegrationService : IIntegrationService
             {
                 var rootFolder = _databaseService.GetRootFolder();
                 var pathToWinRec = _databaseService.GetWinrecPath();
-                var pathToOmp = string.Concat(pathToWinRec, "/OMP_C");
+                var pathToOmp = Path.Combine(pathToWinRec, "OMP_C");
                 if(string.IsNullOrEmpty(pathToWinRec) || string.IsNullOrEmpty(rootFolder)) continue;
                 
                 var config = _databaseService.GetModuleConfig();
                 
                 var globalBatch = new List<FilePair>();
-                const int TransactionBatchSize = 1000; 
+                const int TransactionBatchSize = 500; 
                 if (!config.DbIsFull)
                 {
                     // --- Full scan ---
@@ -101,8 +130,7 @@ public class IntegrationService : IIntegrationService
                         await ProcessCacheFolderAsync(rootFolder, pathToOmp, token, globalBatch, TransactionBatchSize);
                     }
                 }
-                await Task.Delay(TimeSpan.FromSeconds(5), token);
-            
+                await Task.Delay(TimeSpan.FromSeconds(5), token);            
             }
             catch (OperationCanceledException)
             {
@@ -111,7 +139,7 @@ public class IntegrationService : IIntegrationService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Критична помилка в циклі інтеграції");
-                await Task.Delay(5000);
+                await Task.Delay(5000, token);            
             }
         }
     }
@@ -133,27 +161,51 @@ public class IntegrationService : IIntegrationService
             
             string metaPath = filePath + ".meta";
             string targetFolder = null;
+            int serverId = 0;
             if (File.Exists(metaPath))
             {
                 try 
                 {
                     using (JsonDocument doc = JsonDocument.Parse(await File.ReadAllTextAsync(metaPath)))
                     { 
-                        if (doc.RootElement.TryGetProperty("targetPath", out JsonElement pathElement))
+                        // 1. Get the path (this is a string)
+                        if (doc.RootElement.TryGetProperty("targetPath", out JsonElement pathEl))
                         {
-                            targetFolder = pathElement.GetString();
+                            targetFolder = pathEl.GetString();
+                        }
+
+                        // 2. Get the server ID (this is a number) - FROM A SEPARATE PROPERTY
+                        // Check what the field is called in JSON: “serverId”, “id,” or “ServerId”?
+                        if (doc.RootElement.TryGetProperty("serverId", out JsonElement idEl)) 
+                        {
+                            // We use secure parsing, which I wrote about earlier.
+                            if (idEl.ValueKind == JsonValueKind.Number)
+                            {
+                                serverId = idEl.GetInt32();
+                            }
+                            else if (idEl.ValueKind == JsonValueKind.String && int.TryParse(idEl.GetString(), out int val))
+                            {
+                                serverId = val;
+                            }
                         }
                     }
                     if (!string.IsNullOrWhiteSpace(targetFolder)) File.Delete(metaPath);
                 }
-                catch (JsonException) 
+                catch (JsonException exception) 
                 {
-                    File.Delete(metaPath);
+                    _logger.LogError($"Битий JSON у файлі {metaPath}: {exception.Message}");
+                    File.Delete(metaPath); // Видаляємо, щоб не застрягати вічно
                 }  
             } 
             
             var fileObj = BaseFileFactory.Create(filePath);
-            if (fileObj == null) continue;
+            if (fileObj == null || fileObj.ReconNumber == 0)
+            {
+                _logger.LogWarning($"Пропускаємо некоректний файл: {Path.GetFileName(filePath)} (Не вдалося розпарсити номер)");
+                continue;
+            }
+            
+            fileObj.ServerId = serverId;
             
             if (string.IsNullOrEmpty(targetFolder))
             {
@@ -236,6 +288,7 @@ public class IntegrationService : IIntegrationService
             }
             
             await ProcessFilePairAsync(pair, rootFolder, pathToOmpExecutable, globalBatch, transactionBatchSize);
+            _mailService.AddToQueue(pair);
         }
         if (globalBatch.Count > 0)
         {
@@ -246,16 +299,44 @@ public class IntegrationService : IIntegrationService
     
     private T MoveFileToStorage<T>(T file, string targetFolder) where T : BaseFile
     {
+        if (!File.Exists(file.FullPath)) return file;
         try
         {
             string fileName = Path.GetFileName(file.FullPath);
             string destPath = Path.Combine(targetFolder, fileName);
             
-            File.Move(file.FullPath, destPath, overwrite: true);
+            if (!Directory.Exists(targetFolder))
+            {
+                Directory.CreateDirectory(targetFolder);
+            }
+
+            if (string.Equals(file.FullPath, destPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return file;
+            }
+
+            RemoveReadOnlyAttribute(file.FullPath);
+
+            if (File.Exists(destPath))
+            {
+                RemoveReadOnlyAttribute(destPath);
             
+                try 
+                {
+                    File.Delete(destPath);
+                }
+                catch (IOException)
+                {
+                    Thread.Sleep(200);
+                    File.Delete(destPath);
+                }
+            }
+        
+            MoveFileWithRetry(file.FullPath, destPath);
+        
             file.FullPath = destPath;
             file.ParentFolderPath = targetFolder;
-        
+    
             return file;
         }
         catch (Exception ex)
@@ -635,14 +716,14 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
             catch (IOException) // File is busy
             {
                 if (i == maxRetries - 1) throw; // Last attempt - throw an error
-                System.Threading.Thread.Sleep(500); // Waiting 0.5 seconds
+                Thread.Sleep(500); // Waiting 0.5 seconds
             }
             catch (UnauthorizedAccessException) // No permissions or ReadOnly
             {
                 // Let's try removing the attributes again, in case something has changed.
                 RemoveReadOnlyAttribute(source);
                 if (i == maxRetries - 1) throw;
-                System.Threading.Thread.Sleep(500);
+                Thread.Sleep(500);
             }
         }
     }
@@ -676,6 +757,7 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
         {
             // REXPR is always processed first to obtain an accurate timestamp
             await pair.Express!.ProcessAsync(rootFolder);
+            
         }
         
         if (hasData)
@@ -693,6 +775,8 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
         {
             await pair.Other!.ProcessAsync(rootFolder);
         }
+
+        await _databaseService.UpdateDailyStatAsync(pair.ServerId, "integrated");
         
         globalBatch.Add(pair);
         if (globalBatch.Count >= transactionBatchSize)

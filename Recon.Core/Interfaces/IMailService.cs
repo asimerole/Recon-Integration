@@ -1,4 +1,6 @@
-﻿namespace Recon.Core.Interfaces;
+﻿using Recon.Core.Models;
+
+namespace Recon.Core.Interfaces;
 
 public interface IMailService
 {
@@ -7,4 +9,10 @@ public interface IMailService
     
     // Mass mailing (for the “Notify everyone” function)
     Task SendToAllAsync(IEnumerable<string> recipients, string subject, string body, IEnumerable<string>? attachments = null);
+
+    Task ProcessBatchAsync(List<FilePair> batch);
+
+    void AddToQueue(FilePair pair);
+
+    void StartSendingLoop();
 }

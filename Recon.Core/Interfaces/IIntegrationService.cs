@@ -4,7 +4,7 @@ public interface IIntegrationService
 {
     void StartIntegration(IProgress<int> progress = null);
     
-    void StopIntegration();
+    Task StopIntegration();
     
     void SetFastBuild(bool isFastBuild);
 }

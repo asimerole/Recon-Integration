@@ -74,6 +74,7 @@ public partial class App : Application
                 services.AddSingleton<IConfigService, ConfigService>();
                 services.AddSingleton<ConfigMonitorService>();
                 services.AddSingleton<IStatisticsService, StatisticsService>();
+                services.AddSingleton<OneDrivePermissonService>();
                 
                 // Окна (View)
                 services.AddTransient<AuthWindow>();        // WPF Window

@@ -32,10 +32,24 @@ public interface IDatabaseService
     Task UpdateDailyStatAsync(int serverID, string column);
     
     List<string> GetActiveUserEmails();
+
+    List<string> GetAllUserEmails();
     
     Task EnsureStructureExistsAsync(string unitName, string substationName, string objectName, int reconNumber, string objectFolderPath);
     
     Task InsertBatchAsync(List<FilePair> globalBatch);
 
     Task<string?> GetTargetFolderByReconIdAsync(int reconId);
+    
+    Task<List<string>> GetRecipientsByReconIdAsync(int reconId);
+    
+    Task<List<UserAccessDto>> GetUsersForOneDriveUpdateAsync();
+    
+    Task MarkOneDriveAccessGrantedAsync(int userId);
+
+    Task<List<UserAccessDto>> GetUsersForOneDriveRemovalAsync();
+
+    Task MarkOneDriveAccessRevokedAsync(int userId);
+    
+    Task<AzureConfig> GetAzureConfigAsync();
 }

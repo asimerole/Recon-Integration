@@ -14,6 +14,9 @@ public class MailServerConfig
     [JsonPropertyName("email_sender")]
     public string EmailSender { get; set; } = string.Empty;
     
+    [JsonPropertyName("msg_template")]
+    public string MsgTemplate { get; set; } = string.Empty;
+    
     [JsonPropertyName("name_sender")]
     public string NameSender { get; set; } = "Recon Service";
     

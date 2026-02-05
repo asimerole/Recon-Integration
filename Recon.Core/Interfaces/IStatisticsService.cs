@@ -1,4 +1,5 @@
 ﻿using Recon.Core.Enums;
+using Recon.Core.Options;
 
 namespace Recon.Core.Interfaces;
 
@@ -9,4 +10,6 @@ public interface IStatisticsService
     (int Last2Hours, int Today) GetStats(ServiceType type);
     
     void SetDailyCountFromDb(ServiceType type, int dbCount);
+
+    Task<bool> SendAnalyticsToUsers(MailServerConfig config);
 }

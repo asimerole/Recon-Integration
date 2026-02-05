@@ -11,6 +11,8 @@
       <PackageReference Include="FluentFTP" Version="53.0.2" />
       <PackageReference Include="MailKit" Version="4.14.1" />
       <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.0-preview2.25289.6" />
+      <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+      <PackageReference Include="Microsoft.Graph" Version="5.100.0" />
       <PackageReference Include="MimeKit" Version="4.14.0" />
     </ItemGroup>
 

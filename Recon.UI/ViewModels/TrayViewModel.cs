@@ -1,4 +1,6 @@
-﻿using System.Windows;
+﻿using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -12,6 +14,10 @@ namespace Recon.UI.ViewModels;
 
 public partial class TrayViewModel : ObservableObject
 {
+    private DateTime _appStartTime;
+    private DispatcherTimer _uptimeTimer;
+    private string _uptimeStr;
+    
     private readonly IIntegrationService _integrationService;
     private readonly ConfigMonitorService _configMonitor;
     private readonly IFtpService _ftpService;
@@ -19,6 +25,7 @@ public partial class TrayViewModel : ObservableObject
     private readonly IOneDriveService _oneDriveService;
     private readonly IDatabaseService _dbService;
     private readonly IStatisticsService _stats;
+    private readonly OneDrivePermissonService _oneDrivePermissionService;
     private DispatcherTimer _timer;
     
     private string _statsButtonContent;
@@ -57,7 +64,8 @@ public partial class TrayViewModel : ObservableObject
         IIntegrationService integrationService,
         IDatabaseService dbService,
         ConfigMonitorService configMonitor,
-        IStatisticsService stats)
+        IStatisticsService stats,
+        OneDrivePermissonService oneDrivePermissonService)
     {
         _stats = stats;
         _ftpService = ftpService;
@@ -65,6 +73,7 @@ public partial class TrayViewModel : ObservableObject
         _oneDriveService = oneDriveService;
         _integrationService = integrationService;
         _dbService = dbService;
+        _oneDrivePermissionService = oneDrivePermissonService;
         
         _configMonitor = configMonitor;
         _configMonitor.OnConfigChanged += OnRemoteConfigReceived;
@@ -74,14 +83,47 @@ public partial class TrayViewModel : ObservableObject
         IsIntegrationActive = false;
         IsMailActive = false;
         IsOneDriveActive = false;
-        Version = "v. 1.1.0 від 18.12.2025";
+        Version = "v. 1.1.2 від 04.02.2025";
         _isInitializing = true;
+        
+        _appStartTime = DateTime.Now;
+
+        // 2. Настраиваем таймер (тикает каждую секунду)
+        /*_uptimeTimer = new DispatcherTimer();
+        _uptimeTimer.Interval = TimeSpan.FromSeconds(1);
+        _uptimeTimer.Tick += (s, e) => UpdateUptime();
+        _uptimeTimer.Start();*/
+
+        // 3. Сразу инициализируем текст
+        UpdateUptime();
         
         LoadModuleStates();
         
         _isInitializing = false;
         
         RunModules();
+    }
+    
+    public string UptimeStr
+    {
+        get => _uptimeStr;
+        set
+        {
+            _uptimeStr = value;
+            OnPropertyChanged();
+        }
+    }
+
+    private void UpdateUptime()
+    {
+        var timeSpan = DateTime.Now - _appStartTime;
+        UptimeStr = $"Час роботи: {timeSpan:dd\\.hh\\:mm\\:ss}";
+    }
+    
+    public event PropertyChangedEventHandler PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string name = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
     
     [RelayCommand]
@@ -91,7 +133,7 @@ public partial class TrayViewModel : ObservableObject
         
         if (string.IsNullOrWhiteSpace(message)) return;
         
-        var users = _dbService.GetActiveUserEmails();
+        var users = _dbService.GetAllUserEmails();
         
         if (users.Count == 0)
         {
@@ -134,7 +176,7 @@ public partial class TrayViewModel : ObservableObject
         _integrationService.SetFastBuild(_fastDatabaseBuild);
         
         IsIntegrationActive = false;
-
+        await _integrationService.StopIntegration();
         try 
         {
             await _dbService.RebuildDatabaseAsync();
@@ -151,8 +193,11 @@ public partial class TrayViewModel : ObservableObject
 
             if (wantStartIntegration == MessageBoxResult.Yes)
             {
-                IsIntegrationActive = true;
                 _integrationService.SetFastBuild(_fastDatabaseBuild);
+                
+                var progressReporter = CreateProgressReporter(); 
+                _integrationService.StartIntegration(progressReporter);
+                IsIntegrationActive = true;
             } 
         }
         catch (Exception ex)
@@ -170,7 +215,8 @@ public partial class TrayViewModel : ObservableObject
         if (IsFtpActive) _ftpService.StartFTP();
         
         _oneDriveService.StartCleanupScheduler();
-        
+        _mailService.StartSendingLoop();
+        _oneDrivePermissionService.StartMonitoring();
     }
     
     private IProgress<int> CreateProgressReporter()

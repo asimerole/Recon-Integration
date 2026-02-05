@@ -42,8 +42,6 @@ public class ConfigService : IConfigService
             string key = match.Groups["key"].Value.ToLowerInvariant();
             string value = match.Groups["value"].Value.Trim().Trim('"', '\''); 
 
-            _logger.LogInformation($"Найдено: {key} = {value}");
-
             switch (key)
             {
                 case "server":

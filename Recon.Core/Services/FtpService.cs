@@ -305,12 +305,12 @@ public class FtpService : IFtpService
             server.LastDailyFileDate = item.Modified;
         }
         
-        await CreateMetaFileAsync(item.Name, server.LocalFolderPath);
+        await CreateMetaFileAsync(item.Name, server.LocalFolderPath, server.Id);
     }
     
-    private async Task CreateMetaFileAsync(string fileName, string target)
+    private async Task CreateMetaFileAsync(string fileName, string target, int serverIdValue)
     {
-        var metaData = new { targetPath = target };
+        var metaData = new { targetPath = target, serverId = serverIdValue };
         var jsonOptions = new JsonSerializerOptions 
         { 
             WriteIndented = true, 

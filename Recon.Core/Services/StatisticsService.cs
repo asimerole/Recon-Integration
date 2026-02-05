@@ -1,6 +1,9 @@
 ﻿using System.Collections.Concurrent;
+using Microsoft.Data.SqlClient;
 using Recon.Core.Enums;
 using Recon.Core.Interfaces;
+using Recon.Core.Options;
+using Microsoft.Extensions.Logging;
 
 namespace Recon.Core.Services;
 
@@ -16,8 +19,12 @@ public class StatisticsService : IStatisticsService
 
     private readonly object _lock = new object();
 
-    public StatisticsService()
+    private readonly IDatabaseService _databaseService;
+    private readonly ILogger<OneDrivePermissonService> _logger;
+    public StatisticsService(IDatabaseService databaseService)
     {
+        _databaseService = databaseService;
+        
         // Initialize empty lists
         foreach (ServiceType type in Enum.GetValues(typeof(ServiceType)))
         {
@@ -59,5 +66,20 @@ public class StatisticsService : IStatisticsService
 
             return (list.Count, _dailyCounters[type]);
         }
+    }
+    
+    public async Task<bool> SendAnalyticsToUsers(MailServerConfig config)
+    {
+        bool allSuccessed = true;
+        try
+        {
+            
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, ex.Message);
+        }
+
+        return false;
     }
 }

@@ -83,6 +83,32 @@ public class DatabaseService : IDatabaseService
             return new List<string>();
         }
     }
+
+    public List<string> GetAllUserEmails()
+    {
+        if (string.IsNullOrEmpty(_connectionString))
+        {
+            _logger.LogError("Попытка запроса к БД без инициализации строки подключения. (GetUserByLogin)");
+            return null;
+        }
+
+        try
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                string sql = @"SELECT login FROM users";
+                
+                var users = connection.Query<string>(sql, new {Status = UserStatus.Active}).ToList();
+                
+                return users;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ошибка при сборе почт всех активных пользователей");
+            return new List<string>();
+        }
+    }
     
     // 1. For prime numbers (Feeding Time)
     public int GetFeedingTime() => 
@@ -260,6 +286,8 @@ public class DatabaseService : IDatabaseService
 
     public async Task UpdateDailyStatAsync(int serverId, string columnName)
     {
+        if (serverId == 0) return;
+        
         var allowedColumns = new[] { "collected", "emailed", "integrated", "uploaded" };
         if (!allowedColumns.Contains(columnName))
         {
@@ -450,7 +478,7 @@ public class DatabaseService : IDatabaseService
             string checkOrphansSql = @"
                 SELECT temp.ReconNum, temp.FileNum, temp.Object
                 FROM #ImportBuffer temp
-                LEFT JOIN [ReconDB].[dbo].[struct] s 
+                LEFT JOIN [struct] s 
                     ON s.recon_id = temp.ReconNum AND s.object = temp.Object
                 WHERE s.id IS NULL; 
             ";
@@ -483,6 +511,26 @@ public class DatabaseService : IDatabaseService
             await transaction.RollbackAsync();
             _logger.LogError($"Ошибка при вставке батча: {ex.Message}");
             throw;
+        }
+    }
+
+    public async Task<List<string>> GetRecipientsByReconIdAsync(int reconId)
+    {
+        string sql = @"
+        SELECT DISTINCT u.login 
+        FROM [dbo].[users] u
+        INNER JOIN [dbo].[users_units] uu ON u.id = uu.user_id
+        INNER JOIN [dbo].[struct_units] su ON uu.unit_id = su.unit_id
+        INNER JOIN [dbo].[struct] s ON su.struct_id = s.id
+        WHERE s.recon_id = @ReconId 
+          AND u.send_mail = 1  
+          AND u.status = 1;    
+    ";
+
+        using (var connection = new SqlConnection(_connectionString))
+        {
+            var result = await connection.QueryAsync<string>(sql, new { ReconId = reconId });
+            return result.ToList();
         }
     }
 
@@ -557,43 +605,43 @@ public class DatabaseService : IDatabaseService
     private const string SqlCreateTempTable = @"
         CREATE TABLE #ImportBuffer (
             [ReconNum] INT,
-            [FileNum] VARCHAR(30),
-            [Object] NVARCHAR(255),
+            [FileNum] VARCHAR(30) COLLATE DATABASE_DEFAULT,
+            [Object] NVARCHAR(255) COLLATE DATABASE_DEFAULT,
             [Date] DATE,
             [Time] TIME(3),
             [DataBinary] VARBINARY(MAX),
             [ExpressBinary] VARBINARY(MAX),
             [OtherBinary] VARBINARY(MAX),
-            [FileType] VARCHAR(15),
+            [FileType] VARCHAR(15) COLLATE DATABASE_DEFAULT,
             [HasExpress] BIT,
-            [DamagedLine] NVARCHAR(255),
-            [Factor] NVARCHAR(MAX),
-            [TypeKz] NVARCHAR(255)
+            [DamagedLine] NVARCHAR(255) COLLATE DATABASE_DEFAULT,
+            [Factor] NVARCHAR(MAX) COLLATE DATABASE_DEFAULT,
+            [TypeKz] NVARCHAR(255) COLLATE DATABASE_DEFAULT
         );";
     
 private string GetMergeSql()
 {
     return @"
         -- 1. MERGE DATA
-        MERGE INTO [ReconDB].[dbo].[data] AS target
+        MERGE INTO [data] AS target
         USING (
             SELECT * FROM (
                 SELECT 
                     temp.*, 
                     s.id as StructId,
-                    -- !!! МАГИЯ ТУТ: Нумеруем дубликаты (если пришли одинаковые ID, Date, FileNum)
                     ROW_NUMBER() OVER (
                         PARTITION BY s.id, temp.FileNum, temp.Date 
-                        ORDER BY temp.Time DESC -- Берем тот, где время новее (или любое)
+                        ORDER BY temp.Time DESC
                     ) as RowNum
                 FROM #ImportBuffer temp
-                INNER JOIN [ReconDB].[dbo].[struct] s 
-                    ON s.recon_id = temp.ReconNum AND s.object = temp.Object
+                INNER JOIN [struct] s 
+                    ON s.recon_id = temp.ReconNum 
+                    AND s.object = temp.Object COLLATE DATABASE_DEFAULT 
             ) AS t
-            WHERE t.RowNum = 1 -- !!! Оставляем только уникальные записи
+            WHERE t.RowNum = 1
         ) AS source
         ON (target.struct_id = source.StructId 
-            AND target.file_num = source.FileNum 
+            AND target.file_num = source.FileNum COLLATE DATABASE_DEFAULT
             AND target.date = source.Date)
 
         WHEN MATCHED THEN
@@ -609,18 +657,21 @@ private string GetMergeSql()
             VALUES (source.StructId, source.Date, source.Time, source.FileNum, source.DataBinary, source.ExpressBinary, source.OtherBinary, source.FileType);
 
         -- 2. MERGE DATA_PROCESS
-        MERGE INTO [ReconDB].[dbo].[data_process] AS target
+        MERGE INTO [data_process] AS target
         USING (
-            SELECT DISTINCT -- Добавил DISTINCT на всякий случай
+            SELECT DISTINCT 
                 d.id as DataId,
                 temp.DamagedLine,
                 temp.Factor,
                 temp.TypeKz
             FROM #ImportBuffer temp
-            INNER JOIN [ReconDB].[dbo].[struct] s 
-                ON s.recon_id = temp.ReconNum AND s.object = temp.Object
-            INNER JOIN [ReconDB].[dbo].[data] d
-                ON d.struct_id = s.id AND d.file_num = temp.FileNum AND d.date = temp.Date
+            INNER JOIN [struct] s 
+                ON s.recon_id = temp.ReconNum 
+                AND s.object = temp.Object COLLATE DATABASE_DEFAULT 
+            INNER JOIN [data] d
+                ON d.struct_id = s.id 
+                AND d.file_num = temp.FileNum COLLATE DATABASE_DEFAULT
+                AND d.date = temp.Date
             WHERE temp.HasExpress = 1
         ) AS source
         ON (target.id = source.DataId)
@@ -641,11 +692,7 @@ private string GetMergeSql()
 
     public async Task<string?> GetTargetFolderByReconIdAsync(int reconId)
     {
-        string sql = @"
-        SELECT TOP 1 d.local_path
-        FROM [ReconDB].[dbo].[struct] s 
-        JOIN [ReconDB].[dbo].[FTP_Directories] d ON d.struct_id = s.id 
-        WHERE s.recon_id = @ReconId";
+        string sql = "SELECT TOP 1 [files_path] FROM [struct] WHERE recon_id = @ReconId";
 
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
@@ -655,5 +702,246 @@ private string GetMergeSql()
 
         var result = await cmd.ExecuteScalarAsync();
         return result?.ToString(); 
+    }
+
+    
+    public async Task<List<UserAccessDto>> GetUsersForOneDriveUpdateAsync()
+    {
+        // Цей запит повертає "плоску" таблицю: UserID | Email | Path
+        // Ми беремо тільки тих, у кого увімкнено OneDrive, але ще не стоїть прапорець "Видано"
+        // (Вам доведеться додати колонку onedrive_access_granted BIT DEFAULT 0 в таблицю users)
+        
+        string sql = @"
+            SELECT 
+                u.id as UserId,
+                u.login as Email, 
+                s.files_path as FilePath,
+                CASE WHEN u.type = 'Адмін' THEN 1 ELSE 0 END as IsAdmin
+            FROM users u
+            JOIN users_units uu ON u.id = uu.user_id
+            JOIN struct_units su ON uu.unit_id = su.unit_id
+            JOIN struct s ON su.struct_id = s.id
+            WHERE u.isOneDriveActive = 1 
+              AND u.onedrive_access_granted = 0  
+              AND s.files_path IS NOT NULL
+        ";
+    
+        using (var conn = new SqlConnection(_connectionString))
+        {
+            var rawData = await conn.QueryAsync<dynamic>(sql);
+    
+            // Групуємо плоскі дані в об'єкти (один юзер -> багато шляхів)
+            var result = rawData
+                .GroupBy(x => x.UserId)
+                .Select(g => new UserAccessDto
+                {
+                    UserId = g.Key,
+                    Email = g.First().Email,
+                    IsAdmin = (g.First().IsAdmin == 1),
+                    FolderPaths = g.Where(x => x.FilePath != null)
+                        .Select(x => (string)x.FilePath)
+                        .Distinct()
+                        .ToList()
+                })
+                .ToList();
+    
+            return result;
+        }
+        
+    }
+    
+    public async Task MarkOneDriveAccessGrantedAsync(int userId)
+    {
+        using (var conn = new SqlConnection(_connectionString))
+        {
+            await conn.ExecuteAsync(
+                "UPDATE users SET onedrive_access_granted = 1 WHERE id = @Id", 
+                new { Id = userId });
+        }
+    }
+    
+    public async Task<List<UserAccessDto>> GetUsersForOneDriveRemovalAsync()
+    {
+        string sql = @"
+        SELECT 
+            u.id as UserId,
+            u.login as Email, 
+            s.files_path as FilePath,
+            CASE WHEN u.type = 'Адмін' THEN 1 ELSE 0 END as IsAdmin
+        FROM users u
+        JOIN users_units uu ON u.id = uu.user_id
+        JOIN struct_units su ON uu.unit_id = su.unit_id
+        JOIN struct s ON su.struct_id = s.id
+        WHERE u.isOneDriveActive = 0          
+          AND u.onedrive_access_granted = 1   
+          AND s.files_path IS NOT NULL
+    ";
+
+        using (var conn = new SqlConnection(_connectionString))
+        {
+            var rawData = await conn.QueryAsync<dynamic>(sql);
+
+            var result = rawData
+                .GroupBy(x => (int)x.UserId)
+                .Select(g => new UserAccessDto
+                {
+                    UserId = g.Key,
+                    Email = g.First().Email,
+                    IsAdmin = (g.First().IsAdmin == 1), // Читаємо роль
+                
+                    // Якщо це адмін — список шляхів нам не важливий, але хай буде
+                    FolderPaths = g.Where(x => x.FilePath != null)
+                        .Select(x => (string)x.FilePath)
+                        .Distinct()
+                        .ToList()
+                })
+                .ToList();
+
+            return result;
+        }
+    }
+
+// Метод, щоб скинути прапорець назад в 0
+    public async Task MarkOneDriveAccessRevokedAsync(int userId)
+    {
+        string sql = "UPDATE users SET onedrive_access_granted = 0 WHERE id = @Id";
+        using (var conn = new SqlConnection(_connectionString))
+        {
+            await conn.ExecuteAsync(sql, new { Id = userId });
+        }
+    }
+
+    public async Task<AzureConfig> GetAzureConfigAsync()
+    {
+        using (var conn = new SqlConnection(_connectionString))
+        {
+            string json = await conn.QueryFirstOrDefaultAsync<string>(
+                "SELECT [value] FROM [access_settings] WHERE [name] = @Name",
+                new { Name = "onedrive" });
+
+            if (string.IsNullOrEmpty(json))
+            {
+                return null;
+            }
+
+            try
+            {
+                var config = JsonSerializer.Deserialize<AzureConfig>(json);
+                return config;
+            }
+            catch (JsonException ex)
+            {
+                throw new Exception($"Помилка парсингу Azure конфігурації: {ex.Message}");
+            }
+        }
+    }
+    
+    /*public Dictionary<string, ErrorDetails> GetUnreachableServers(List<ServerInfo> servers)
+    {
+        var unreachableServersMap = new Dictionary<string, ErrorDetails>();
+
+        foreach (var server in servers)
+        {
+            // Формування URL та повного імені (аналог wstring конкатенації)
+            string url = FtpService.Instance.Protocol + server.Ip;
+            string serverIdentifier = $"{server.Unit} - {server.Substation} ({server.Ip})";
+
+            // Перевірка з'єднання
+            bool isReachable = FtpService.Instance.CheckConnection(
+                url,
+                server.Login,
+                server.Pass
+            );
+
+            // Перевірка файлів (ваш кастомний метод)
+            string fileErrors = CheckDailyFileByServer(server);
+            string finalError = string.Empty;
+
+            if (!isReachable)
+            {
+                finalError = "Недоступний (Connection Fail)";
+
+                if (!string.IsNullOrEmpty(fileErrors))
+                {
+                    finalError += $" [Файлові дані: {fileErrors}]";
+                }
+            }
+            else if (!string.IsNullOrEmpty(fileErrors))
+            {
+                if (fileErrors == "TotalFailure")
+                {
+                    finalError = "Файловий збій: Сервер перегружався/ДЛС не працює";
+                }
+                else
+                {
+                    finalError = "Файловий збій: " + fileErrors;
+                }
+            }
+
+            // Якщо є помилка, додаємо до словника
+            if (!string.IsNullOrEmpty(finalError))
+            {
+                string fullName = $"{server.Unit} - {server.Substation} ({server.Ip})";
+                
+                // std::make_pair -> new ErrorDetails (або Tuple)
+                unreachableServersMap[server.Object] = new ErrorDetails(fullName, finalError);
+            }
+        }
+
+        return unreachableServersMap;
+    }*/
+    
+    public Dictionary<string, List<string>> GetUsersGroupedBySubstation(string connectionString)
+    {
+        var substationUsers = new Dictionary<string, List<string>>();
+
+        const string sqlQuery = @"
+            SELECT 
+                LEFT(us.[login], 255) AS login,
+                LEFT(un.[substation], 255) AS substation
+            FROM [users] us
+            JOIN [users_units] uu ON us.[id] = uu.[user_id]
+            JOIN [units] un ON uu.[unit_id] = un.[id]
+            WHERE us.[status] = 1 AND us.[send_mail] = 1";
+
+        try
+        {
+            using (var connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+                
+                using (var command = new SqlCommand(sqlQuery, connection))
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        try
+                        {
+                            // Отримуємо дані. У C# рядки автоматично підтримують Unicode
+                            string login = reader["login"].ToString();
+                            string substation = reader["substation"].ToString();
+
+                            if (!substationUsers.ContainsKey(substation))
+                            {
+                                substationUsers[substation] = new List<string>();
+                            }
+
+                            substationUsers[substation].Add(login);
+                        }
+                        catch (Exception ex)
+                        {
+                           _logger.LogError($"[Mail] General failure in loadUsersFromDatabase (convert): {ex.Message}");
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"[Mail] Failed to execute SQL query or connect: {ex.Message}");
+            return new Dictionary<string, List<string>>(); 
+        }
+
+        return substationUsers;
     }
 }

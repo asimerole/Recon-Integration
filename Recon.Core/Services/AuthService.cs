@@ -31,7 +31,7 @@ public class AuthService : IAuthService
             }
         }
         
-        MessageBox.Show("Користувача не було знайдено.","Увага!");
+        //MessageBox.Show("Користувача не було знайдено.","Увага!");
         return false;
     }
 }
