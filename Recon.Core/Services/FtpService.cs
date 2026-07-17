@@ -57,8 +57,8 @@ public class FtpService : IFtpService
         {
             while (!token.IsCancellationRequested)
             {
-                var rootFolder = _configRepository.GetRootFolder();
-                var servers = _serverRepository.GetAllServers();
+                var rootFolder = await _configRepository.GetRootFolderAsync();
+                var servers = await _serverRepository.GetAllServersAsync();
 
                 _ftpCacheDir = Path.Combine(rootFolder, "Cache");
                 if (!Directory.Exists(_ftpCacheDir))
@@ -68,11 +68,11 @@ public class FtpService : IFtpService
                 {
                     if (token.IsCancellationRequested) break;
 
-                    var config = _configRepository.GetModuleConfig();
+                    var config = await _configRepository.GetModuleConfigAsync();
                     if (!config.IsFtpActive) break;
 
                     bool isOneDriveActive = config.IsOneDriveActive;
-                    var oneDriveConfig = _configRepository.GetOneDriveConfig();
+                    var oneDriveConfig = await _configRepository.GetOneDriveConfigAsync();
 
                     CreateLocalDirectoryTree(server, rootFolder);
                     if (isOneDriveActive) CreateLocalDirectoryTree(server, oneDriveConfig.Path);
@@ -80,7 +80,7 @@ public class FtpService : IFtpService
                     await ProcessServerAsync(server, isOneDriveActive, token);
                 }
 
-                int feedingTime = _configRepository.GetFeedingTime();
+                int feedingTime = await _configRepository.GetFeedingTimeAsync();
                 await Task.Delay(TimeSpan.FromSeconds(feedingTime), token);
             }
         }

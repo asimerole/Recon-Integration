@@ -5,7 +5,7 @@ namespace Recon.Core.Factories;
 
 public static class BaseFileFactory
 {
-    public static BaseFile? Create(string filePath)
+    public static BaseFile? BuildAndOpenConnectionAsync(string filePath)
     {
         string fileName = Path.GetFileName(filePath).ToUpper();
         

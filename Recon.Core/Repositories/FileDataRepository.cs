@@ -23,7 +23,7 @@ public class FileDataRepository : IFileDataRepository
     {
         try
         {
-            using var connection = _db.Create();
+            using var connection = await _db.BuildAndOpenConnectionAsync();
             await connection.ExecuteAsync(
                 "[dbo].[sp_RebuildDatabase]",
                 commandType: CommandType.StoredProcedure,
@@ -39,8 +39,7 @@ public class FileDataRepository : IFileDataRepository
 
     public async Task<string?> GetTargetFolderByReconIdAsync(int reconId)
     {
-        using var connection = _db.Create();
-        await connection.OpenAsync();
+        using var connection = await _db.BuildAndOpenConnectionAsync();
         using var cmd = new SqlCommand("SELECT TOP 1 [files_path] FROM [struct] WHERE recon_id = @ReconId", connection);
         cmd.Parameters.AddWithValue("@ReconId", reconId);
         var result = await cmd.ExecuteScalarAsync();
@@ -51,7 +50,7 @@ public class FileDataRepository : IFileDataRepository
     {
         try
         {
-            using var connection = _db.Create();
+            using var connection = await _db.BuildAndOpenConnectionAsync();
             const string sql = @"
                 BEGIN TRANSACTION;
 
@@ -119,7 +118,7 @@ public class FileDataRepository : IFileDataRepository
               AND u.send_mail = 1
               AND u.status = 1;";
 
-        using var connection = _db.Create();
+        using var connection = await _db.BuildAndOpenConnectionAsync();
         var result = await connection.QueryAsync<string>(sql, new { ReconId = reconId });
         return result.ToList();
     }
@@ -130,8 +129,7 @@ public class FileDataRepository : IFileDataRepository
 
         var dataTable = BuildImportTable(batch);
 
-        using var connection = _db.Create();
-        await connection.OpenAsync();
+        using var connection = await _db.BuildAndOpenConnectionAsync();
         using var transaction = connection.BeginTransaction();
         try
         {

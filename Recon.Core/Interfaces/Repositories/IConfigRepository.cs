@@ -4,12 +4,12 @@ namespace Recon.Core.Interfaces.Repositories;
 
 public interface IConfigRepository
 {
-    ModuleConfig GetModuleConfig();
-    void SaveModuleConfig(ModuleConfig config);
-    MailServerConfig GetMailServerConfig();
-    OneDriveConfig GetOneDriveConfig();
-    string GetRootFolder();
-    string GetWinrecPath();
-    int GetFeedingTime();
+    Task<ModuleConfig> GetModuleConfigAsync();
+    Task SaveModuleConfigAsync(ModuleConfig config);
+    Task<MailServerConfig> GetMailServerConfigAsync();
+    Task<OneDriveConfig> GetOneDriveConfigAsync();
+    Task<string> GetRootFolderAsync();
+    Task<string> GetWinrecPathAsync();
+    Task<int> GetFeedingTimeAsync();
     Task<AzureConfig> GetAzureConfigAsync();
 }

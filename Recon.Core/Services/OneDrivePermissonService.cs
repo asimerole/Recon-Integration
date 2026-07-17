@@ -62,8 +62,8 @@ public class OneDrivePermissonService
                     continue;
                 }
 
-                var oneDriveConfig = _configRepository.GetOneDriveConfig();
-                var sourceRootPath = _configRepository.GetRootFolder();
+                var oneDriveConfig = await _configRepository.GetOneDriveConfigAsync();
+                var sourceRootPath = await _configRepository.GetRootFolderAsync();
 
                 Initialize(azureConfig, oneDriveConfig.Path, sourceRootPath);
 

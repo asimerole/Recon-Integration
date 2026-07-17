@@ -19,4 +19,8 @@
         <PackageReference Include="MimeKit" Version="4.17.0" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="Enteties\" />
+    </ItemGroup>
+
 </Project>

@@ -19,16 +19,16 @@ public class ConfigRepository : IConfigRepository
         _logger = logger;
     }
 
-    public ModuleConfig GetModuleConfig() =>
-        GetSetting<ModuleConfig>("file_integration") ?? new ModuleConfig();
+    public Task<ModuleConfig> GetModuleConfigAsync() =>
+        GetSettingAsync<ModuleConfig>("file_integration", new ModuleConfig());
 
-    public void SaveModuleConfig(ModuleConfig config)
+    public async Task SaveModuleConfigAsync(ModuleConfig config)
     {
         try
         {
-            using var connection = _db.Create();
+            using var connection = await _db.BuildAndOpenConnectionAsync();
             string json = JsonSerializer.Serialize(config);
-            connection.Execute(
+            await connection.ExecuteAsync(
                 "UPDATE [access_settings] SET [value] = @Json WHERE [name] = 'file_integration'",
                 new { Json = json });
         }
@@ -38,24 +38,24 @@ public class ConfigRepository : IConfigRepository
         }
     }
 
-    public MailServerConfig GetMailServerConfig() =>
-        GetSetting<MailServerConfig>("mail") ?? new MailServerConfig();
+    public Task<MailServerConfig> GetMailServerConfigAsync() =>
+        GetSettingAsync<MailServerConfig>("mail", new MailServerConfig());
 
-    public OneDriveConfig GetOneDriveConfig() =>
-        GetSetting<OneDriveConfig>("onedrive") ?? new OneDriveConfig();
+    public Task<OneDriveConfig> GetOneDriveConfigAsync() =>
+        GetSettingAsync<OneDriveConfig>("onedrive", new OneDriveConfig());
 
-    public string GetRootFolder() =>
-        GetSetting<string>("root_directory") ?? string.Empty;
+    public async Task<string> GetRootFolderAsync() =>
+        await GetSettingAsync<string>("root_directory", string.Empty) ?? string.Empty;
 
-    public string GetWinrecPath() =>
-        GetSetting<string>("winrec-bs") ?? string.Empty;
+    public async Task<string> GetWinrecPathAsync() =>
+        await GetSettingAsync<string>("winrec-bs", string.Empty) ?? string.Empty;
 
-    public int GetFeedingTime() =>
-        GetSetting<int>("feeding_cycle");
+    public async Task<int> GetFeedingTimeAsync() =>
+        await GetSettingAsync<int>("feeding_cycle", 0);
 
     public async Task<AzureConfig> GetAzureConfigAsync()
     {
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         string? json = await conn.QueryFirstOrDefaultAsync<string>(
             "SELECT [value] FROM [access_settings] WHERE [name] = @Name",
             new { Name = "onedrive" });
@@ -73,19 +73,19 @@ public class ConfigRepository : IConfigRepository
         }
     }
 
-    private T? GetSetting<T>(string settingName)
+    private async Task<T?> GetSettingAsync<T>(string settingName, T? defaultValue = default)
     {
         try
         {
-            using var connection = _db.Create();
-            string? rawValue = connection.QuerySingleOrDefault<string>(
+            using var connection = await _db.BuildAndOpenConnectionAsync();
+            string? rawValue = await connection.QuerySingleOrDefaultAsync<string>(
                 "SELECT value FROM access_settings WHERE name = @Name",
                 new { Name = settingName });
 
             if (string.IsNullOrEmpty(rawValue))
             {
                 _logger.LogWarning("Налаштування {Setting} не знайдено в БД або воно пусте.", settingName);
-                return default;
+                return defaultValue;
             }
 
             if (typeof(T) == typeof(string))
@@ -99,7 +99,7 @@ public class ConfigRepository : IConfigRepository
                 PropertyNameCaseInsensitive = true,
                 NumberHandling = JsonNumberHandling.AllowReadingFromString
             };
-            return JsonSerializer.Deserialize<T>(rawValue, options);
+            return JsonSerializer.Deserialize<T>(rawValue, options) ?? defaultValue;
         }
         catch (Exception ex)
         {

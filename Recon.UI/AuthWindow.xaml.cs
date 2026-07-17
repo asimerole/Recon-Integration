@@ -30,36 +30,33 @@ public partial class AuthWindow : Window
         LoadConfigFiles();
     }
     
-    private void LoginButton_Click(object sender, RoutedEventArgs e)
+    private async void LoginButton_Click(object sender, RoutedEventArgs e)
     {
         var basePath = AppDomain.CurrentDomain.BaseDirectory;
         var path = basePath + ConfigComboBox.SelectedItem;
-        
+
         string login = LoginBox.Text;
-        string password;
-        if (ShowPasswordCheck.IsChecked == true)
-        {
-            password = VisiblePasswordBox.Text;
-        }
-        else
-        {
-            password = HiddenPasswordBox.Password;
-        }
-        
+        string password = ShowPasswordCheck.IsChecked == true
+            ? VisiblePasswordBox.Text
+            : HiddenPasswordBox.Password;
+
         if (!string.IsNullOrWhiteSpace(login) && !string.IsNullOrWhiteSpace(password))
         {
             var dbOptions = _configService.LoadDatabaseConfig(path);
-            bool success = _authService.Login(login, password, dbOptions);
+            bool success = await _authService.LoginAsync(login, password, dbOptions);
 
             if (success)
             {
                 if (SaveParamsToRegistryCheck.IsChecked == true)
-                {
                     SaveParamsToRegistry(login, password);
-                }
+
                 IsAuthenticated = true;
                 DialogResult = true;
                 Close();
+            }
+            else
+            {
+                MessageBox.Show("Невірний логін або пароль");
             }
         }
         else
@@ -73,7 +70,7 @@ public partial class AuthWindow : Window
         try
         {
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            string[] configFiles = Directory.GetFiles(appDirectory, "*.conf");
+            string[] configFiles = Directory.GetFiles(appDirectory, "*.recon");
             
             foreach (var filePath in configFiles)
             {

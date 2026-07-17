@@ -4,8 +4,8 @@ namespace Recon.Core.Interfaces.Repositories;
 
 public interface IUserRepository
 {
-    User? GetUserByLogin(string username);
-    List<string> GetActiveUserEmails();
-    List<string> GetAllUserEmails();
-    Dictionary<string, List<string>> GetUsersGroupedBySubstation();
+    Task<User?> GetUserByLoginAsync(string username);
+    Task<List<string>> GetActiveUserEmailsAsync();
+    Task<List<string>> GetAllUserEmailsAsync();
+    Task<Dictionary<string, List<string>>> GetUsersGroupedBySubstationAsync();
 }

@@ -109,15 +109,15 @@ public class IntegrationService : IIntegrationService
         {
             try
             {
-                var rootFolder = _configRepository.GetRootFolder();
-                var pathToWinRec = _configRepository.GetWinrecPath();
+                var rootFolder = await _configRepository.GetRootFolderAsync();
+                var pathToWinRec = await _configRepository.GetWinrecPathAsync();
                 var pathToOmp = Path.Combine(pathToWinRec, "OMP_C");
                 if(string.IsNullOrEmpty(pathToWinRec) || string.IsNullOrEmpty(rootFolder)) continue;
 
-                var config = _configRepository.GetModuleConfig();
-                
+                var config = await _configRepository.GetModuleConfigAsync();
+
                 var globalBatch = new List<FilePair>();
-                const int TransactionBatchSize = 500; 
+                const int TransactionBatchSize = 500;
                 if (!config.DbIsFull)
                 {
                     // --- Full scan ---
@@ -125,7 +125,7 @@ public class IntegrationService : IIntegrationService
                     if (!token.IsCancellationRequested)
                     {
                         config.DbIsFull = true;
-                        _configRepository.SaveModuleConfig(config);
+                        await _configRepository.SaveModuleConfigAsync(config);
                     }
                 }
                 else
@@ -206,7 +206,7 @@ public class IntegrationService : IIntegrationService
                 }  
             } 
             
-            var fileObj = BaseFileFactory.Create(filePath);
+            var fileObj = BaseFileFactory.BuildAndOpenConnectionAsync(filePath);
             if (fileObj == null || fileObj.ReconNumber == 0)
             {
                 _logger.LogWarning($"Пропускаємо некоректний файл: {Path.GetFileName(filePath)} (Не вдалося розпарсити номер)");
@@ -259,7 +259,7 @@ public class IntegrationService : IIntegrationService
                 string expectedRexpr = Path.Combine(cachePath, "REXPR" + df.FileName.Substring(5));
                 if (File.Exists(expectedRexpr))
                 {
-                    pair.Express = CreateExpressObjectAfterGeneration(df);
+                    pair.Express = BuildAndOpenConnectionAsyncExpressObjectAfterGeneration(df);
                     pair.Express.FullPath = expectedRexpr;
                     try
                     {
@@ -345,7 +345,7 @@ public class IntegrationService : IIntegrationService
         }
     }
     
-    private ExpressFile CreateExpressObjectAfterGeneration(DataFile dataFile)
+    private ExpressFile BuildAndOpenConnectionAsyncExpressObjectAfterGeneration(DataFile dataFile)
     {
         string baseName = dataFile.FileName.Substring(5); // 353.704
         string newFileName = "REXPR" + baseName;
@@ -456,7 +456,7 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
             continue;
         }
         
-        var file = BaseFileFactory.Create(filePath); 
+        var file = BaseFileFactory.BuildAndOpenConnectionAsync(filePath); 
         if (file == null || file.ReconNumber == 0) 
         {
             skippedInvalidCount++;
@@ -729,7 +729,7 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
             var success = await TryGenerateExpressFileAsync(pathToOmpExecutable, pair.Data.FullPath);
             if (success)
             {
-                pair.Express = CreateExpressObjectAfterGeneration(pair.Data);
+                pair.Express = BuildAndOpenConnectionAsyncExpressObjectAfterGeneration(pair.Data);
                 hasExpress = true;
             }
             else

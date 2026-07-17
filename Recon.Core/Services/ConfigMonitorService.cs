@@ -41,7 +41,7 @@ public class ConfigMonitorService
     {
         try
         {
-            _lastKnownConfig = _configRepository.GetModuleConfig();
+            _lastKnownConfig = await _configRepository.GetModuleConfigAsync();
         }
         catch { }
 
@@ -51,7 +51,7 @@ public class ConfigMonitorService
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), token);
 
-                var remoteConfig = _configRepository.GetModuleConfig();
+                var remoteConfig = await _configRepository.GetModuleConfigAsync();
 
                 if (HasConfigChanged(_lastKnownConfig, remoteConfig))
                 {

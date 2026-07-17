@@ -19,11 +19,11 @@ public class ServerRepository : IServerRepository
         _logger = logger;
     }
 
-    public List<ServerInfo> GetAllServers()
+    public async Task<List<ServerInfo>> GetAllServersAsync()
     {
         try
         {
-            using var connection = _db.Create();
+            using var connection = await _db.BuildAndOpenConnectionAsync();
             const string sql = @"
                 SELECT
                     fs.id AS Id,
@@ -46,11 +46,11 @@ public class ServerRepository : IServerRepository
                 JOIN [FTP_Directories] d ON d.struct_id = s.id
                 WHERE fs.status = @ServerStatus AND d.isActiveDir = @DirStatus";
 
-            var servers = connection.Query<ServerInfo>(sql, new
+            var servers = (await connection.QueryAsync<ServerInfo>(sql, new
             {
                 ServerStatus = ServerStatus.Active,
                 DirStatus = DirStatus.Active
-            }).ToList();
+            })).ToList();
 
             foreach (var server in servers)
             {
@@ -74,7 +74,7 @@ public class ServerRepository : IServerRepository
     {
         try
         {
-            using var connection = _db.Create();
+            using var connection = await _db.BuildAndOpenConnectionAsync();
             const string sql = @"
                 MERGE INTO [logs] AS target
                 USING (SELECT @StructId AS struct_id) AS source
@@ -109,7 +109,7 @@ public class ServerRepository : IServerRepository
 
         try
         {
-            using var connection = _db.Create();
+            using var connection = await _db.BuildAndOpenConnectionAsync();
 
             string updateSql = $@"
                 UPDATE server_daily_stats

@@ -110,7 +110,8 @@ public class OneDriveService : IOneDriveService
     private void EnsureConfig()
     {
         if (_rootPath != null) return;
-        var config = _configRepository.GetOneDriveConfig();
+        // Called only from FTP background task (thread pool) — GetAwaiter().GetResult() is safe
+        var config = _configRepository.GetOneDriveConfigAsync().GetAwaiter().GetResult();
         _rootPath = config.Path;
         _months = config.Months;
     }

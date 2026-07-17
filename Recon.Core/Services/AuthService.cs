@@ -1,7 +1,7 @@
+using Recon.Core.Dtos;
 using Recon.Core.Infrastructure;
 using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
-using Recon.Core.Options;
 
 namespace Recon.Core.Services;
 
@@ -18,11 +18,11 @@ public class AuthService : IAuthService
         _cryptoService = cryptoService;
     }
 
-    public bool Login(string username, string password, DatabaseOptions dbOptions)
+    public async Task<bool> LoginAsync(string username, string password, DbConnectionParamsDto dbOptions)
     {
-        _connectionFactory.SetConnectionString(dbOptions.ConnectionString);
+        _connectionFactory.Initialize(dbOptions);
 
-        var user = _userRepository.GetUserByLogin(username);
+        var user = await _userRepository.GetUserByLoginAsync(username);
         if (user == null) return false;
 
         string hashedPassword = _cryptoService.SHA512(password);

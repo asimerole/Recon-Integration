@@ -33,7 +33,7 @@ public class OneDriveRepository : IOneDriveRepository
               AND u.onedrive_access_granted = 0
               AND s.files_path IS NOT NULL";
 
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         var rawData = await conn.QueryAsync<dynamic>(sql);
 
         return rawData
@@ -67,7 +67,7 @@ public class OneDriveRepository : IOneDriveRepository
               AND u.onedrive_access_granted = 1
               AND s.files_path IS NOT NULL";
 
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         var rawData = await conn.QueryAsync<dynamic>(sql);
 
         return rawData
@@ -87,7 +87,7 @@ public class OneDriveRepository : IOneDriveRepository
 
     public async Task MarkOneDriveAccessGrantedAsync(int userId)
     {
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         await conn.ExecuteAsync(
             "UPDATE users SET onedrive_access_granted = 1 WHERE id = @Id",
             new { Id = userId });
@@ -95,7 +95,7 @@ public class OneDriveRepository : IOneDriveRepository
 
     public async Task MarkOneDriveAccessRevokedAsync(int userId)
     {
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         await conn.ExecuteAsync(
             "UPDATE users SET onedrive_access_granted = 0 WHERE id = @Id",
             new { Id = userId });

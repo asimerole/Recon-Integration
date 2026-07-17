@@ -71,7 +71,8 @@ public partial class TrayViewModel : ObservableObject
         _uptimeTimer.Start();
         UpdateUptime();
 
-        LoadModuleStates();
+        // Run on thread pool to avoid blocking UI thread
+        Task.Run(async () => await LoadModuleStatesAsync()).GetAwaiter().GetResult();
         _isInitializing = false;
         RunModules();
     }
@@ -92,7 +93,7 @@ public partial class TrayViewModel : ObservableObject
         string message = ShowInputDialog("Введіть повідомлення для користувачів:");
         if (string.IsNullOrWhiteSpace(message)) return;
 
-        var users = _userRepository.GetAllUserEmails();
+        var users = await _userRepository.GetAllUserEmailsAsync();
         if (users.Count == 0)
         {
             MessageBox.Show("Немає активних користувачів для розсилки.");
@@ -127,9 +128,9 @@ public partial class TrayViewModel : ObservableObject
         {
             await _fileDataRepository.RebuildDatabaseAsync();
 
-            var config = _configRepository.GetModuleConfig();
+            var config = await _configRepository.GetModuleConfigAsync();
             config.DbIsFull = false;
-            _configRepository.SaveModuleConfig(config);
+            await _configRepository.SaveModuleConfigAsync(config);
 
             var start = MessageBox.Show(
                 "Базу даних успішно очищено.\nЗапустити модуль інтеграції файлів?",
@@ -164,9 +165,9 @@ public partial class TrayViewModel : ObservableObject
     private IProgress<int> CreateProgressReporter() =>
         new Progress<int>(percent => Progress = $"Інтеграція: {percent}%");
 
-    private void LoadModuleStates()
+    private async Task LoadModuleStatesAsync()
     {
-        var config = _configRepository.GetModuleConfig();
+        var config = await _configRepository.GetModuleConfigAsync();
         IsFtpActive = config.IsFtpActive;
         IsIntegrationActive = config.IsIntegrationActive;
         IsMailActive = config.IsMailActive;
@@ -174,16 +175,17 @@ public partial class TrayViewModel : ObservableObject
         _fastDatabaseBuild = config.FastDatabaseBuild;
     }
 
-    private void SaveCurrentState()
+    private async Task SaveCurrentStateAsync()
     {
-        _configRepository.SaveModuleConfig(new ModuleConfig
+        var config = await _configRepository.GetModuleConfigAsync();
+        await _configRepository.SaveModuleConfigAsync(new ModuleConfig
         {
             IsFtpActive = IsFtpActive,
             IsIntegrationActive = IsIntegrationActive,
             IsMailActive = IsMailActive,
             IsOneDriveActive = IsOneDriveActive,
             FastDatabaseBuild = _fastDatabaseBuild,
-            DbIsFull = _configRepository.GetModuleConfig().DbIsFull
+            DbIsFull = config.DbIsFull
         });
     }
 
@@ -209,7 +211,7 @@ public partial class TrayViewModel : ObservableObject
     partial void OnIsFtpActiveChanged(bool value)
     {
         if (_isSyncingWithDb || _isInitializing) return;
-        SaveCurrentState();
+        _ = Task.Run(SaveCurrentStateAsync);
         if (value) _ftpService.StartFTP();
         else _ftpService.StopFTP();
     }
@@ -217,7 +219,7 @@ public partial class TrayViewModel : ObservableObject
     partial void OnIsIntegrationActiveChanged(bool value)
     {
         if (_isSyncingWithDb || _isInitializing) return;
-        SaveCurrentState();
+        _ = Task.Run(SaveCurrentStateAsync);
         if (value)
         {
             var reporter = CreateProgressReporter();
@@ -233,12 +235,12 @@ public partial class TrayViewModel : ObservableObject
     partial void OnIsMailActiveChanged(bool value)
     {
         if (_isSyncingWithDb || _isInitializing) return;
-        SaveCurrentState();
+        _ = Task.Run(SaveCurrentStateAsync);
     }
 
     partial void OnIsOneDriveActiveChanged(bool value)
     {
         if (_isSyncingWithDb || _isInitializing) return;
-        SaveCurrentState();
+        _ = Task.Run(SaveCurrentStateAsync);
     }
 }

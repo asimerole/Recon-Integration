@@ -18,12 +18,12 @@ public class UserRepository : IUserRepository
         _logger = logger;
     }
 
-    public User? GetUserByLogin(string username)
+    public async Task<User?> GetUserByLoginAsync(string username)
     {
         try
         {
-            using var connection = _db.Create();
-            return connection.QuerySingleOrDefault<User>(
+            using var connection = await _db.BuildAndOpenConnectionAsync();
+            return await connection.QuerySingleOrDefaultAsync<User>(
                 "SELECT login AS Username, password AS PasswordHash FROM users WHERE login = @Login",
                 new { Login = username });
         }
@@ -34,14 +34,15 @@ public class UserRepository : IUserRepository
         }
     }
 
-    public List<string> GetActiveUserEmails()
+    public async Task<List<string>> GetActiveUserEmailsAsync()
     {
         try
         {
-            using var connection = _db.Create();
-            return connection.Query<string>(
+            using var connection = await _db.BuildAndOpenConnectionAsync();
+            var result = await connection.QueryAsync<string>(
                 "SELECT login FROM users WHERE status = @Status",
-                new { Status = UserStatus.Active }).ToList();
+                new { Status = UserStatus.Active });
+            return result.ToList();
         }
         catch (Exception ex)
         {
@@ -50,12 +51,13 @@ public class UserRepository : IUserRepository
         }
     }
 
-    public List<string> GetAllUserEmails()
+    public async Task<List<string>> GetAllUserEmailsAsync()
     {
         try
         {
-            using var connection = _db.Create();
-            return connection.Query<string>("SELECT login FROM users").ToList();
+            using var connection = await _db.BuildAndOpenConnectionAsync();
+            var result = await connection.QueryAsync<string>("SELECT login FROM users");
+            return result.ToList();
         }
         catch (Exception ex)
         {
@@ -64,7 +66,7 @@ public class UserRepository : IUserRepository
         }
     }
 
-    public Dictionary<string, List<string>> GetUsersGroupedBySubstation()
+    public async Task<Dictionary<string, List<string>>> GetUsersGroupedBySubstationAsync()
     {
         var result = new Dictionary<string, List<string>>();
 
@@ -77,10 +79,10 @@ public class UserRepository : IUserRepository
 
         try
         {
-            using var connection = _db.Create();
-            using var reader = connection.ExecuteReader(sql);
+            using var connection = await _db.BuildAndOpenConnectionAsync();
+            using var reader = await connection.ExecuteReaderAsync(sql);
 
-            while (reader.Read())
+            while (await reader.ReadAsync())
             {
                 string login = reader["login"]?.ToString() ?? string.Empty;
                 string substation = reader["substation"]?.ToString() ?? string.Empty;

@@ -34,7 +34,6 @@ public class MailService : IMailService
     public void StartSendingLoop()
     {
         if (_sendingTask != null) return;
-        _config = _configRepository.GetMailServerConfig();
         _sendingTask = Task.Run(SendingLoop);
     }
 
@@ -86,7 +85,7 @@ public class MailService : IMailService
 
     public async Task SendToAllAsync(IEnumerable<string> recipients, string subject, string body, IEnumerable<string>? attachments = null)
     {
-        EnsureConfig();
+        await EnsureConfigAsync();
         if (string.IsNullOrEmpty(_config!.SmtpServer))
         {
             _logger.LogError("Немає налаштувань SMTP сервера!");
@@ -189,7 +188,7 @@ public class MailService : IMailService
     private async Task SendEmailForGroupAsync(int reconId, List<string> recipients, List<FilePair> files)
     {
         if (!files.Any()) return;
-        EnsureConfig();
+        await EnsureConfigAsync();
         if (string.IsNullOrEmpty(_config!.SmtpServer))
         {
             _logger.LogError("Немає налаштувань SMTP сервера!");
@@ -313,8 +312,8 @@ public class MailService : IMailService
         }
     }
 
-    private void EnsureConfig()
+    private async Task EnsureConfigAsync()
     {
-        _config ??= _configRepository.GetMailServerConfig();
+        _config ??= await _configRepository.GetMailServerConfigAsync();
     }
 }
