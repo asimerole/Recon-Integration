@@ -1,51 +1,60 @@
-﻿<Application x:Class="Recon.UI.App"
+<Application x:Class="Recon.UI.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Recon.UI"
              xmlns:tb="http://www.hardcodet.net/taskbar"
+             xmlns:md="http://materialdesigninxaml.net/winfx/xaml/themes"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-        
-        <tb:TaskbarIcon x:Key="MyTrayIcon"
-                        ToolTipText="Recon Integration"
-                        IconSource="/Assets/Icons/icon.ico"> 
-            <tb:TaskbarIcon.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="{Binding Version}" IsEnabled="False"/>
-                    <MenuItem Header="{Binding UptimeStr}" IsEnabled="False"/>
-                    <MenuItem Header="{Binding Progress, StringFormat='Інтеграція: {0}%'}" 
-                              IsEnabled="False"/>
-                    
-                    <MenuItem Header="Повідомити всіх" 
-                              Command="{Binding NotifyAllCommand}" />
-                    
-                    <Separator/>
-                    
-                    <MenuItem Header="OneDrive - ввимк/вимк" 
-                              IsCheckable="True"
-                              IsChecked="{Binding IsOneDriveActive, Mode=TwoWay}"/>
-                    
-                    <MenuItem Header="Поштова розсилка - ввимк/вимк" 
-                              IsCheckable="True"
-                              IsChecked="{Binding IsMailActive, Mode=TwoWay}"/>
-                    
-                    <MenuItem Header="Сбір - ввимк/вимк" 
-                              IsCheckable="True"
-                              IsChecked="{Binding IsFtpActive, Mode=TwoWay}"/>
-                    
-                    <MenuItem Header="Інтеграція в БД - ввимк/вимк" 
-                              IsCheckable="True"
-                              IsChecked="{Binding IsIntegrationActive, Mode=TwoWay}" />
-                    
-                    <MenuItem Header="Повторна збірка" 
-                              Command="{Binding RebuildDatabaseCommand}" />
-                    
-                    <MenuItem Header="Вихід" 
-                              Command="{Binding ExitAppCommand}" />
-                    
-                </ContextMenu>
-            </tb:TaskbarIcon.ContextMenu>
-        </tb:TaskbarIcon>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <md:BundledTheme BaseTheme="Dark"
+                                 PrimaryColor="DeepPurple"
+                                 SecondaryColor="Cyan" />
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign2.Defaults.xaml" />
+            </ResourceDictionary.MergedDictionaries>
 
+            <tb:TaskbarIcon x:Key="MyTrayIcon"
+                            ToolTipText="Recon Integration"
+                            IconSource="/Assets/Icons/icon.ico">
+                <tb:TaskbarIcon.ContextMenu>
+                    <ContextMenu FontFamily="Segoe UI" FontSize="13">
+
+                        <!-- Info block -->
+                        <MenuItem Header="{Binding Version}" IsEnabled="False" FontWeight="SemiBold"/>
+                        <MenuItem Header="{Binding UptimeStr}" IsEnabled="False" Foreground="Gray"/>
+                        <MenuItem Header="{Binding Progress}" IsEnabled="False" Foreground="Gray"/>
+
+                        <Separator/>
+
+                        <!-- Module toggles -->
+                        <MenuItem Header="🔄  Збір FTP"
+                                  IsCheckable="True"
+                                  IsChecked="{Binding IsFtpActive, Mode=TwoWay}"/>
+                        <MenuItem Header="⚙️  Інтеграція в БД"
+                                  IsCheckable="True"
+                                  IsChecked="{Binding IsIntegrationActive, Mode=TwoWay}"/>
+                        <MenuItem Header="📧  Поштова розсилка"
+                                  IsCheckable="True"
+                                  IsChecked="{Binding IsMailActive, Mode=TwoWay}"/>
+                        <MenuItem Header="☁️  OneDrive синхронізація"
+                                  IsCheckable="True"
+                                  IsChecked="{Binding IsOneDriveActive, Mode=TwoWay}"/>
+
+                        <Separator/>
+
+                        <!-- Actions -->
+                        <MenuItem Header="📢  Повідомити всіх користувачів"
+                                  Command="{Binding NotifyAllCommand}"/>
+                        <MenuItem Header="🗄️  Повторна збірка БД"
+                                  Command="{Binding RebuildDatabaseCommand}"/>
+
+                        <Separator/>
+
+                        <MenuItem Header="✖  Вихід"
+                                  Command="{Binding ExitAppCommand}"/>
+                    </ContextMenu>
+                </tb:TaskbarIcon.ContextMenu>
+            </tb:TaskbarIcon>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

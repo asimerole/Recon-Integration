@@ -1,32 +1,30 @@
-﻿using Microsoft.Extensions.Logging;
-using Recon.Core.Interfaces;
+using Microsoft.Extensions.Logging;
+using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Options;
 
 namespace Recon.Core.Services;
 
 public class ConfigMonitorService
 {
-    private readonly IDatabaseService _dbService;
+    private readonly IConfigRepository _configRepository;
     private readonly ILogger<ConfigMonitorService> _logger;
-    
+
     public event Action<ModuleConfig>? OnConfigChanged;
 
     private CancellationTokenSource? _cts;
-    private ModuleConfig? _lastKnownConfig; 
+    private ModuleConfig? _lastKnownConfig;
 
-    public ConfigMonitorService(IDatabaseService dbService, ILogger<ConfigMonitorService> logger)
+    public ConfigMonitorService(IConfigRepository configRepository, ILogger<ConfigMonitorService> logger)
     {
-        _dbService = dbService;
+        _configRepository = configRepository;
         _logger = logger;
     }
 
     public void StartMonitoring()
     {
-        if (_cts != null) return; 
+        if (_cts != null) return;
 
         _cts = new CancellationTokenSource();
-        // _logger.LogInformation("Моніторинг змін конфігурації запущено.");
-        
         Task.Run(() => MonitoringLoop(_cts.Token));
     }
 
@@ -36,32 +34,28 @@ public class ConfigMonitorService
         {
             _cts.Cancel();
             _cts = null;
-            //_logger.LogInformation("Моніторинг змін конфігурації зупинено.");
         }
     }
 
     private async Task MonitoringLoop(CancellationToken token)
     {
-        try 
+        try
         {
-            _lastKnownConfig = _dbService.GetModuleConfig();
+            _lastKnownConfig = _configRepository.GetModuleConfig();
         }
-        catch { /* Игнорируем ошибки первого запуска */ }
+        catch { }
 
         while (!token.IsCancellationRequested)
         {
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), token);
-                
-                var remoteConfig = _dbService.GetModuleConfig();
-                
+
+                var remoteConfig = _configRepository.GetModuleConfig();
+
                 if (HasConfigChanged(_lastKnownConfig, remoteConfig))
                 {
-                    //_logger.LogInformation("Виявлено зміну налаштувань у базі даних.");
-                    
                     OnConfigChanged?.Invoke(remoteConfig);
-                    
                     _lastKnownConfig = remoteConfig;
                 }
             }
@@ -77,16 +71,14 @@ public class ConfigMonitorService
         }
     }
 
-    private bool HasConfigChanged(ModuleConfig? oldConfig, ModuleConfig newConfig)
+    private static bool HasConfigChanged(ModuleConfig? oldConfig, ModuleConfig newConfig)
     {
-        if (oldConfig == null) return true; 
-        
-        if (oldConfig.IsFtpActive != newConfig.IsFtpActive) return true;
-        if (oldConfig.IsIntegrationActive != newConfig.IsIntegrationActive) return true;
-        if (oldConfig.IsMailActive != newConfig.IsMailActive) return true;
-        if (oldConfig.IsOneDriveActive != newConfig.IsOneDriveActive) return true;
-        if (oldConfig.DbIsFull != newConfig.DbIsFull) return true;
-        
-        return false;
+        if (oldConfig == null) return true;
+
+        return oldConfig.IsFtpActive != newConfig.IsFtpActive
+            || oldConfig.IsIntegrationActive != newConfig.IsIntegrationActive
+            || oldConfig.IsMailActive != newConfig.IsMailActive
+            || oldConfig.IsOneDriveActive != newConfig.IsOneDriveActive
+            || oldConfig.DbIsFull != newConfig.DbIsFull;
     }
 }

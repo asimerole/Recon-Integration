@@ -1,9 +1,9 @@
-﻿using Azure.Identity;
+using Azure.Identity;
 using Microsoft.Graph;
-using Microsoft.Graph.Models; 
+using Microsoft.Graph.Models;
 using Microsoft.Graph.Drives.Item.Items.Item.Invite;
 using Microsoft.Graph.Models.ODataErrors;
-using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using Microsoft.Extensions.Logging;
 using Recon.Core.Models;
 using Recon.Core.Options;
@@ -13,505 +13,307 @@ namespace Recon.Core.Services;
 
 public class OneDrivePermissonService
 {
-    private GraphServiceClient _graphClient;
-    
-    private string _cloudRootFolderName; 
-    private string _localRootFullPath;
-    private string _adminEmail;
-    
-    // Зберігаємо поточний конфіг, щоб не перестворювати клієнта дарма
-    private AzureConfig _currentConfig;
-    
-    private Task _workingTask;
-    private CancellationTokenSource _cts;
-    private readonly IDatabaseService _dbService;
+    private GraphServiceClient? _graphClient;
+
+    private string _cloudRootFolderName = string.Empty;
+    private string _localRootFullPath = string.Empty;
+    private string _adminEmail = string.Empty;
+    private AzureConfig? _currentConfig;
+
+    private Task? _workingTask;
+    private CancellationTokenSource? _cts;
+
+    private readonly IOneDriveRepository _oneDriveRepository;
+    private readonly IConfigRepository _configRepository;
     private readonly ILogger<OneDrivePermissonService> _logger;
 
-    // (Lazy initialization)
-    public OneDrivePermissonService(IDatabaseService dbService, ILogger<OneDrivePermissonService> logger)
+    public OneDrivePermissonService(IOneDriveRepository oneDriveRepository, IConfigRepository configRepository,
+        ILogger<OneDrivePermissonService> logger)
     {
-        _dbService = dbService;
+        _oneDriveRepository = oneDriveRepository;
+        _configRepository = configRepository;
         _logger = logger;
     }
 
-    private string NormalizePath(string path)
+    public void StartMonitoring()
     {
-        if (string.IsNullOrEmpty(path)) return path;
+        if (_workingTask != null && !_workingTask.IsCompleted) return;
 
-        return path
-            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar) // Міняємо / на \
-            .TrimEnd(Path.DirectorySeparatorChar); // Прибираємо хвіст
+        _cts = new CancellationTokenSource();
+        _workingTask = Task.Run(() => WorkerLoop(_cts.Token));
+        _logger.LogInformation("OneDrive Permission Monitor запущено.");
     }
-    
+
+    public void StopMonitoring()
+    {
+        _cts?.Cancel();
+    }
+
+    private async Task WorkerLoop(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                var azureConfig = await _configRepository.GetAzureConfigAsync();
+                if (azureConfig == null)
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(1), token);
+                    continue;
+                }
+
+                var oneDriveConfig = _configRepository.GetOneDriveConfig();
+                var sourceRootPath = _configRepository.GetRootFolder();
+
+                Initialize(azureConfig, oneDriveConfig.Path, sourceRootPath);
+
+                var usersToGrant = await _oneDriveRepository.GetUsersForOneDriveUpdateAsync();
+                foreach (var user in usersToGrant)
+                {
+                    if (token.IsCancellationRequested) break;
+                    var paths = await SyncUserPermissionsAsync(user);
+                    foreach (var cloudPath in paths)
+                        await GrantAccessAsync(user.Email, user.UserId, cloudPath);
+                }
+
+                var usersToRevoke = await _oneDriveRepository.GetUsersForOneDriveRemovalAsync();
+                foreach (var user in usersToRevoke)
+                {
+                    if (token.IsCancellationRequested) break;
+                    var paths = GetPathsForUser(user);
+                    if (paths.Count == 0)
+                    {
+                        await _oneDriveRepository.MarkOneDriveAccessRevokedAsync(user.UserId);
+                    }
+                    else
+                    {
+                        foreach (var cloudPath in paths)
+                            await RevokeAccessAsync(user.Email, user.UserId, cloudPath);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "КРИТИЧНА ПОМИЛКА в циклі OneDrive Permissions");
+            }
+
+            await Task.Delay(TimeSpan.FromMinutes(1), token);
+        }
+    }
+
     public void Initialize(AzureConfig config, string localOneDrivePath, string sourceRootPath)
     {
-        // Валідація вхідних даних
         if (config == null) throw new ArgumentNullException(nameof(config));
         if (string.IsNullOrEmpty(localOneDrivePath)) return;
         if (string.IsNullOrEmpty(config.AdminEmail)) throw new ArgumentException("AdminEmail is empty in AzureConfig");
 
         string normOneDrive = NormalizePath(localOneDrivePath);
         string normSource = NormalizePath(sourceRootPath);
-        
-        // Економія ресурсів: якщо налаштування ті ж самі - виходимо
-        if (_graphClient != null && 
-            _currentConfig != null &&
-            _currentConfig.ClientId == config.ClientId &&
-            _currentConfig.ClientSecret == config.ClientSecret &&
-            _currentConfig.TenantId == config.TenantId &&
-            _localRootFullPath == localOneDrivePath &&
-            _adminEmail == config.AdminEmail)
+
+        if (_graphClient != null && _currentConfig != null
+            && _currentConfig.ClientId == config.ClientId
+            && _currentConfig.ClientSecret == config.ClientSecret
+            && _currentConfig.TenantId == config.TenantId
+            && _localRootFullPath == normSource
+            && _adminEmail == config.AdminEmail)
         {
             return;
         }
 
-        // Оновлюємо локальні поля
         _currentConfig = config;
         _adminEmail = config.AdminEmail;
-        
         _localRootFullPath = normSource;
-        _cloudRootFolderName = Path.GetFileName(normOneDrive);   
-        
-        // Створюємо клієнта
-        var options = new ClientSecretCredentialOptions
-        {
-            AuthorityHost = AzureAuthorityHosts.AzurePublicCloud
-        };
+        _cloudRootFolderName = Path.GetFileName(normOneDrive);
 
-        var clientSecretCredential = new ClientSecretCredential(
-            config.TenantId, 
-            config.ClientId, 
-            config.ClientSecret, 
-            options);
-            
-        _graphClient = new GraphServiceClient(clientSecretCredential, new[] { "https://graph.microsoft.com/.default" });
-        
-        _logger.LogInformation($"[OneDriveService] Ініціалізовано для адміна: {_adminEmail}");
-    }
-    
-    public void StartMonitoring()
-    {
-        if (_workingTask != null && !_workingTask.IsCompleted) return;
-        
-        _cts = new CancellationTokenSource();
-        _workingTask = Task.Run(() => WorkerLoop(_cts.Token));
-        _logger.LogInformation("OneDrive Permission Monitor запущено.");
-    }
-    
-    public void StopMonitoring()
-    {
-        _cts?.Cancel();
+        var credential = new ClientSecretCredential(
+            config.TenantId,
+            config.ClientId,
+            config.ClientSecret,
+            new ClientSecretCredentialOptions { AuthorityHost = AzureAuthorityHosts.AzurePublicCloud });
+
+        _graphClient = new GraphServiceClient(credential, new[] { "https://graph.microsoft.com/.default" });
+        _logger.LogInformation("OneDrivePermissonService ініціалізовано для: {Admin}", _adminEmail);
     }
 
-private async Task WorkerLoop(CancellationToken token)
-{
-    while (!token.IsCancellationRequested)
-    {
-        // Генеруємо ID для цього проходу циклу, щоб легше читати логи
-        string cycleId = Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-        _logger.LogInformation($"[{cycleId}] === ПОЧАТОК ЦИКЛУ ONEDRIVE SYNC ===");
-
-        try
-        {
-            // 1. Читаємо конфіг
-            var azureConfig = await _dbService.GetAzureConfigAsync();
-            var oneDrivePath = azureConfig.OneDrivePath;
-            var sourceRootPath = _dbService.GetRootFolder();
-            
-            // 2. Ініціалізація
-            Initialize(azureConfig, oneDrivePath, sourceRootPath);
-            
-            // ============================================
-            // БЛОК 1: ВИДАЧА ПРАВ (GRANT)
-            // ============================================
-            var usersToGrant = await _dbService.GetUsersForOneDriveUpdateAsync();
-            
-            if (usersToGrant.Count > 0)
-            {
-                _logger.LogInformation($"[{cycleId}] [GRANT] Знайдено користувачів для видачі прав: {usersToGrant.Count}");
-            }
-            else
-            {
-                _logger.LogInformation($"[{cycleId}] [GRANT] Немає нових користувачів для обробки.");
-            }
-
-            foreach (var user in usersToGrant)
-            {
-                if (token.IsCancellationRequested) break;
-                
-                // Отримуємо відфільтровані шляхи (вже з урахуванням Admin/User)
-                var pathsToProcess = await SyncUserPermissionsAsync(user);
-                
-                _logger.LogInformation($"[{cycleId}] [GRANT] Обробка User: {user.Email} (ID: {user.UserId}). " +
-                                       $"Роль: {(user.IsAdmin ? "ADMIN" : "USER")}. " +
-                                       $"Знайдено унікальних шляхів: {pathsToProcess.Count}");
-
-                foreach (var cloudPath in pathsToProcess)
-                {
-                    _logger.LogInformation($"[{cycleId}]    -> Видаємо доступ до: '{cloudPath}'");
-                    await GrantAccessAsync(user.Email, user.UserId, cloudPath);
-                }
-            }
-
-            // ============================================
-            // БЛОК 2: ЗАБИРАННЯ ПРАВ (REVOKE)
-            // ============================================
-            var usersToRevoke = await _dbService.GetUsersForOneDriveRemovalAsync();
-            
-            if (usersToRevoke.Count > 0)
-            {
-                _logger.LogInformation($"[{cycleId}] [REVOKE] Знайдено користувачів для видалення прав: {usersToRevoke.Count}");
-            }
-
-            foreach (var user in usersToRevoke)
-            {
-                if (token.IsCancellationRequested) break;
-
-                var pathsToProcess = GetPathsForUser(user);
-                
-                _logger.LogInformation($"[{cycleId}] [REVOKE] Обробка User: {user.Email}. " +
-                                       $"Роль: {(user.IsAdmin ? "ADMIN" : "USER")}. " +
-                                       $"Шляхів на видалення: {pathsToProcess.Count}");
-                
-                if (pathsToProcess.Count == 0)
-                {
-                    await _dbService.MarkOneDriveAccessRevokedAsync(user.UserId);
-                }
-
-                foreach (var cloudPath in pathsToProcess)
-                {
-                    _logger.LogInformation($"[{cycleId}]    -> Забираємо доступ у: '{cloudPath}'");
-                    await RevokeAccessAsync(user.Email, user.UserId, cloudPath);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"[{cycleId}] КРИТИЧНА ПОМИЛКА в циклі OneDrive Permissions");
-        }
-
-        _logger.LogInformation($"[{cycleId}] === ЦИКЛ ЗАВЕРШЕНО. Очікування 1 хв... ===");
-        
-        await Task.Delay(TimeSpan.FromMinutes(1), token);
-    }
-    }
-    private async Task<HashSet<string>> SyncUserPermissionsAsync(UserAccessDto user)
-    {
-        if (user.IsAdmin )
-        {
-            return GetPathsForUser(user);
-            
-        }
-        else
-        {
-            user.IsAdmin = true;
-            var paths = GetPathsForUser(user);
-        
-            foreach (var path in paths)
-            {
-                await RevokeAccessAsync(user.Email, user.UserId, path);    
-            }
-        
-            user.IsAdmin = false;
-            //paths = GetPathsForUser(user); // for test. but in release should be uncomm..
-            return paths;
-        }
-       return new HashSet<string>();
-    }
-    
     public async Task GrantAccessAsync(string userEmail, int userId, string fullLocalPath)
     {
-        // Захист від виклику до ініціалізації
         if (_graphClient == null)
         {
-            _logger.LogError("[OneDriveService] Помилка: Сервіс не ініціалізовано. Спочатку викличте Initialize().");
+            _logger.LogError("Сервіс не ініціалізовано. Спочатку викличте Initialize().");
             return;
         }
 
-        try
-        {
-            string cloudPath = ConvertLocalPathToCloudPath(fullLocalPath);
-            if (string.IsNullOrEmpty(cloudPath))
-            {
-                _logger.LogError($"[OneDriveService] Шлях не належить кореневій папці: {fullLocalPath}");
-                return;
-            }
-            
-            // Використовуємо збережений _adminEmail
-            var drive = await _graphClient.Users[_adminEmail].Drive.GetAsync();
-            
-            if (drive == null)
-            {
-                _logger.LogError($"[OneDriveService] Не вдалося знайти диск OneDrive для користувача {_adminEmail}");
-                return;
-            }
-
-            string driveId = drive.Id;
-            
-            // Шукаємо папку
-            var driveItem = await _graphClient.Drives[driveId]
-                .Root
-                .ItemWithPath(cloudPath) 
-                .GetAsync();
-
-            if (driveItem == null)
-            {
-                _logger.LogError($"[OneDriveService] Папка не знайдена в хмарі: {cloudPath}");
-                return;
-            }
-
-            string itemId = driveItem.Id;
-
-            // Формуємо запрошення
-            var inviteBody = new InvitePostRequestBody
-            {
-                Recipients = new List<DriveRecipient>
-                {
-                    new DriveRecipient { Email = userEmail }
-                },
-                Message = "Вам надано доступ до матеріалів Recon (автоматично).",
-                RequireSignIn = true,
-                SendInvitation = true,
-                Roles = new List<string> { "read" } 
-            };
-
-            await _graphClient.Drives[driveId]
-                .Items[itemId]
-                .Invite
-                .PostAsync(inviteBody);
-
-            _logger.LogInformation($"[OneDriveService] Успішно видано доступ {userEmail} до {cloudPath}");
-            
-            // Помічаємо в базі, що права видано (щоб не слати запити вічно)
-            await _dbService.MarkOneDriveAccessGrantedAsync(userId);
-        }
-        catch (ODataError odataEx)
-        {
-            _logger.LogError($"[OneDriveService] Помилка OData: {odataEx.Error?.Code} - {odataEx.Error?.Message}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"[OneDriveService] Помилка Graph API: {ex.Message}");
-        }
-    }
-    
-    public async Task RevokeAccessAsync(string userEmail, int userId, string fullLocalPath)
-    {
-        if (_graphClient == null) return;
-    
         try
         {
             string cloudPath = ConvertLocalPathToCloudPath(fullLocalPath);
             if (string.IsNullOrEmpty(cloudPath)) return;
-    
-            // 1. Отримуємо ID диска та файлу
+
             var drive = await _graphClient.Users[_adminEmail].Drive.GetAsync();
-            string driveId = drive.Id;
-            string itemId;
-            try 
+            if (drive == null) return;
+
+            var driveItem = await _graphClient.Drives[drive.Id].Root.ItemWithPath(cloudPath).GetAsync();
+            if (driveItem == null)
             {
-                // 2. Спробуємо знайти файл
-                var driveItem = await _graphClient.Drives[driveId]
-                    .Root
-                    .ItemWithPath(cloudPath) 
-                    .GetAsync();
-            
-                itemId = driveItem.Id;
+                _logger.LogError("Папка не знайдена в хмарі: {Path}", cloudPath);
+                return;
             }
-            catch (ODataError ex) when (ex.Error?.Code == "itemNotFound")
+
+            var inviteBody = new InvitePostRequestBody
             {
-                _logger.LogWarning($"[Revoke] Файл не знайдено в хмарі: {cloudPath}. Вважаємо доступ скасованим.");
-                
-                await _dbService.MarkOneDriveAccessRevokedAsync(userId);
-                return; 
-            }
-    
-            var permissions = await _graphClient.Drives[driveId]
-                .Items[itemId]
-                .Permissions
-                .GetAsync();
+                Recipients = new List<DriveRecipient> { new DriveRecipient { Email = userEmail } },
+                Message = "Вам надано доступ до матеріалів Recon (автоматично).",
+                RequireSignIn = true,
+                SendInvitation = true,
+                Roles = new List<string> { "read" }
+            };
 
-            if (permissions?.Value != null)
-            {
-                var permsToDelete = permissions.Value
-                    .Where(p => IsMatch(p, userEmail))
-                    .ToList();
-
-                if (permsToDelete.Count > 0)
-                {
-                    _logger.LogInformation($"[Revoke] Знайдено {permsToDelete.Count} активних прав для {userEmail}. Починаємо видалення...");
-
-                    foreach (var perm in permsToDelete)
-                    {
-                        try
-                        {
-                            _logger.LogInformation($"[Revoke] Спроба видалити PermissionId: {perm.Id}...");
-
-                            await _graphClient.Drives[driveId]
-                                .Items[itemId]
-                                .Permissions[perm.Id]
-                                .DeleteAsync();
-
-                            _logger.LogInformation($"[Revoke] [SUCCESS] PermissionId {perm.Id} успішно видалено (API 204).");
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, $"[Revoke] [ERROR] Не вдалося видалити PermissionId {perm.Id}");
-                        }
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning($"[Revoke] Права для {userEmail} на файлі {cloudPath} не знайдені (список пустий).");
-                }
-            }
-    
-            // 5. Оновлюємо статус у БД
-            await _dbService.MarkOneDriveAccessRevokedAsync(userId);
+            await _graphClient.Drives[drive.Id].Items[driveItem.Id].Invite.PostAsync(inviteBody);
+            _logger.LogInformation("Видано доступ {Email} до {Path}", userEmail, cloudPath);
+            await _oneDriveRepository.MarkOneDriveAccessGrantedAsync(userId);
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError("OData помилка: {Code} - {Msg}", ex.Error?.Code, ex.Error?.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Помилка при видаленні прав для {userEmail}");
+            _logger.LogError(ex, "Помилка Graph API при видачі доступу для {Email}", userEmail);
         }
     }
 
-    // === ДОДАТКОВИЙ МЕТОД ДЛЯ ПОРІВНЯННЯ ===
+    public async Task RevokeAccessAsync(string userEmail, int userId, string fullLocalPath)
+    {
+        if (_graphClient == null) return;
+
+        try
+        {
+            string cloudPath = ConvertLocalPathToCloudPath(fullLocalPath);
+            if (string.IsNullOrEmpty(cloudPath)) return;
+
+            var drive = await _graphClient.Users[_adminEmail].Drive.GetAsync();
+            if (drive == null) return;
+
+            string itemId;
+            try
+            {
+                var driveItem = await _graphClient.Drives[drive.Id].Root.ItemWithPath(cloudPath).GetAsync();
+                itemId = driveItem!.Id!;
+            }
+            catch (ODataError ex) when (ex.Error?.Code == "itemNotFound")
+            {
+                _logger.LogWarning("Файл не знайдено в хмарі: {Path}. Вважаємо доступ скасованим.", cloudPath);
+                await _oneDriveRepository.MarkOneDriveAccessRevokedAsync(userId);
+                return;
+            }
+
+            var permissions = await _graphClient.Drives[drive.Id].Items[itemId].Permissions.GetAsync();
+            if (permissions?.Value == null) return;
+
+            var toDelete = permissions.Value.Where(p => IsMatch(p, userEmail)).ToList();
+            foreach (var perm in toDelete)
+            {
+                try
+                {
+                    await _graphClient.Drives[drive.Id].Items[itemId].Permissions[perm.Id].DeleteAsync();
+                    _logger.LogInformation("Видалено дозвіл {Id} для {Email}", perm.Id, userEmail);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Не вдалося видалити дозвіл {Id}", perm.Id);
+                }
+            }
+
+            await _oneDriveRepository.MarkOneDriveAccessRevokedAsync(userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Помилка при видаленні прав для {Email}", userEmail);
+        }
+    }
+
+    private async Task<HashSet<string>> SyncUserPermissionsAsync(UserAccessDto user)
+    {
+        if (user.IsAdmin)
+            return GetPathsForUser(user);
+
+        user.IsAdmin = true;
+        var paths = GetPathsForUser(user);
+        foreach (var path in paths)
+            await RevokeAccessAsync(user.Email, user.UserId, path);
+
+        user.IsAdmin = false;
+        return paths;
+    }
+
+    private HashSet<string> GetPathsForUser(UserAccessDto user)
+    {
+        var result = new HashSet<string>();
+        if (user.FolderPaths == null || user.FolderPaths.Count == 0) return result;
+
+        foreach (var localPath in user.FolderPaths)
+        {
+            string cloudPath = ConvertLocalPathToCloudPath(localPath);
+            if (string.IsNullOrEmpty(cloudPath)) continue;
+
+            result.Add(user.IsAdmin ? GetRootFolder(cloudPath) : cloudPath);
+        }
+
+        return result;
+    }
+
     private bool IsMatch(Permission p, string targetEmail)
     {
-        if (p.GrantedTo?.User != null)
-        {
-            if (CheckIdentity(p.GrantedTo.User, targetEmail)) return true;
-        }
-    
-        // Перевірка для колекцій (якщо доступ надано через спільне посилання декільком)
+        if (p.GrantedTo?.User != null && CheckIdentity(p.GrantedTo.User, targetEmail)) return true;
+
         if (p.GrantedToIdentities != null)
-        {
-            foreach (var identitySet in p.GrantedToIdentities)
-            {
-                if (identitySet.User != null && CheckIdentity(identitySet.User, targetEmail))
-                    return true;
-            }
-        }
-    
+            foreach (var id in p.GrantedToIdentities)
+                if (id.User != null && CheckIdentity(id.User, targetEmail)) return true;
+
         return false;
     }
-    
-    private bool CheckIdentity(Identity user, string email)
+
+    private static bool CheckIdentity(Identity user, string email)
     {
-        // 1. Іноді Id співпадає з email (для зовнішніх користувачів)
-        if (user.Id != null && user.Id.Equals(email, StringComparison.OrdinalIgnoreCase)) 
-            return true;
-    
-        // 2. У SDK v5 email часто ховається в AdditionalData
-        if (user.AdditionalData != null && user.AdditionalData.TryGetValue("email", out var emailObj))
-        {
-            if (emailObj?.ToString()?.Equals(email, StringComparison.OrdinalIgnoreCase) == true)
-                return true;
-        }
-        
-        // 3. Також перевіряємо loginName (іноді буває там)
-        if (user.AdditionalData != null && user.AdditionalData.TryGetValue("loginName", out var loginObj))
-        {
-            if (loginObj?.ToString()?.Equals(email, StringComparison.OrdinalIgnoreCase) == true)
-                return true;
-        }
-        
+        if (user.Id?.Equals(email, StringComparison.OrdinalIgnoreCase) == true) return true;
+
+        if (user.AdditionalData?.TryGetValue("email", out var emailObj) == true
+            && emailObj?.ToString()?.Equals(email, StringComparison.OrdinalIgnoreCase) == true) return true;
+
+        if (user.AdditionalData?.TryGetValue("loginName", out var loginObj) == true
+            && loginObj?.ToString()?.Equals(email, StringComparison.OrdinalIgnoreCase) == true) return true;
+
         return false;
     }
 
     private string ConvertLocalPathToCloudPath(string dbFilePath)
     {
-        string rootPath = _localRootFullPath; 
-        
-        if (string.IsNullOrEmpty(rootPath))
-        {
-            _logger.LogError($"[PathError] _localRootFullPath пустий! Перевірте Initialize(). dbFilePath: {dbFilePath}");
-            return null;
-        }
-    
-        if (string.IsNullOrEmpty(dbFilePath)) 
-        {
-            _logger.LogWarning($"[PathError] Прийшов пустий шлях з бази даних.");
-            return null;
-        }
+        if (string.IsNullOrEmpty(_localRootFullPath) || string.IsNullOrEmpty(dbFilePath))
+            return string.Empty;
 
-        string normDbPath = NormalizePath(dbFilePath);  
-        string normRootPath = NormalizePath(rootPath);   
+        string normDb = NormalizePath(dbFilePath);
+        string normRoot = NormalizePath(_localRootFullPath).TrimEnd('\\', '/');
 
-        normRootPath = normRootPath.TrimEnd('\\', '/');
+        if (normDb.StartsWith(normRoot, StringComparison.OrdinalIgnoreCase))
+            return normDb.Substring(normRoot.Length).TrimStart('\\', '/').Replace("\\", "/");
 
-        if (normDbPath.StartsWith(normRootPath, StringComparison.OrdinalIgnoreCase))
-        {
-            string relative = normDbPath.Substring(normRootPath.Length);
-            var result = relative.TrimStart('\\', '/').Replace("\\", "/");
-            _logger.LogInformation($"[PathDebug] Match! Result: {result}");
-            return result;
-        }
-        
-        //_logger.LogWarning($"[PathMismatch] Шлях не починається з кореня. Root: '{normRootPath}', Target: '{normDbPath}'. Використовуємо як відносний.");
-    
-        var fallbackResult = normDbPath.TrimStart('\\', '/').Replace("\\", "/");
-        return fallbackResult;
+        return normDb.TrimStart('\\', '/').Replace("\\", "/");
     }
-    
-    private HashSet<string> GetPathsForUser(UserAccessDto user)
+
+    private static string GetRootFolder(string cloudPath)
     {
-        var uniquePaths = new HashSet<string>();
-        
-        if (user.FolderPaths == null || user.FolderPaths.Count == 0)
-        {
-            _logger.LogWarning($"[GetPaths] У користувача {user.Email} список FolderPaths пустий або null!");
-            return uniquePaths;
-        }
-
-        foreach (var localPath in user.FolderPaths)
-        {
-            string cloudPath = ConvertLocalPathToCloudPath(localPath);
-            
-            if (string.IsNullOrEmpty(cloudPath)) 
-            {
-                _logger.LogWarning($"[GetPaths] Шлях відкинуто (null/empty) після конвертації: '{localPath}'");
-                continue;
-            }
-
-            if (user.IsAdmin)
-            {
-                string rootFolder = GetRootFolder(cloudPath);
-        
-                if (!string.IsNullOrEmpty(rootFolder))
-                {
-                    uniquePaths.Add(rootFolder);
-                }
-                else 
-                {
-                    _logger.LogWarning($"[GetPaths] Не вдалося визначити RootFolder для: '{cloudPath}'");
-                }
-            }
-            else
-            {
-                uniquePaths.Add(cloudPath);
-            }
-        }
-        
-        _logger.LogInformation($"[GetPaths] User: {user.Email}. Raw: {user.FolderPaths.Count} -> Unique: {uniquePaths.Count}");
-
-        return uniquePaths;
-    }
-    
-    private string GetRootFolder(string cloudPath)
-    {
-        // Нормализуем слеши, чтобы не было путаницы
         string path = cloudPath.Replace("\\", "/").TrimStart('/');
-    
-        int firstSlash = path.IndexOf('/');
-    
-        if (firstSlash > 0)
-        {
-            // Возвращаем подстроку от начала до первого слеша
-            return path.Substring(0, firstSlash);
-        }
-    
-        // Если слешей нет (например, путь просто "ОСП"), возвращаем как есть
-        return path;
+        int slash = path.IndexOf('/');
+        return slash > 0 ? path.Substring(0, slash) : path;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+                   .TrimEnd(Path.DirectorySeparatorChar);
     }
 }

@@ -1,6 +1,6 @@
-﻿using System.Reflection.PortableExecutable;
 using Microsoft.Extensions.Logging;
 using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using System.IO;
 
 namespace Recon.Core.Services;
@@ -8,72 +8,66 @@ namespace Recon.Core.Services;
 public class OneDriveService : IOneDriveService
 {
     private readonly ILogger<OneDriveService> _logger;
-    private readonly string _rootPath;
-    private readonly int _months;
-    
+    private readonly IConfigRepository _configRepository;
+
+    private string? _rootPath;
+    private int _months;
     private CancellationTokenSource? _cts;
-    
-    public OneDriveService(ILogger<OneDriveService> logger, IConfigService configService, IDatabaseService databaseService)
+
+    public OneDriveService(ILogger<OneDriveService> logger, IConfigRepository configRepository)
     {
         _logger = logger;
-        
-        var config = databaseService.GetOneDriveConfig();
-        _rootPath = config.Path;
-        _months = config.Months;
+        _configRepository = configRepository;
     }
 
     public void CopyToOneDrive(string localSourcePath, string relativePath)
     {
-        if (string.IsNullOrEmpty(_rootPath) || string.IsNullOrEmpty(_rootPath)) return;
+        EnsureConfig();
+        if (string.IsNullOrEmpty(_rootPath)) return;
 
         try
         {
             string destPath = Path.Combine(_rootPath, relativePath);
-            string destDir = Path.GetDirectoryName(destPath);
+            string? destDir = Path.GetDirectoryName(destPath);
+            if (destDir != null && !Directory.Exists(destDir))
+                Directory.CreateDirectory(destDir);
 
-            if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
-            
-            File.Copy(localSourcePath, destPath, true);
+            File.Copy(localSourcePath, destPath, overwrite: true);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Помилка копіювання в OneDrive: {Path}", relativePath);        
+            _logger.LogError(ex, "Помилка копіювання в OneDrive: {Path}", relativePath);
         }
     }
-    
+
     public void StartCleanupScheduler()
     {
-        if (_cts != null) return; 
+        if (_cts != null) return;
+        EnsureConfig();
         _cts = new CancellationTokenSource();
-        
         Task.Run(() => CleanupLoop(_cts.Token));
     }
-    
+
     public void StopCleanupScheduler()
     {
         _cts?.Cancel();
         _cts = null;
     }
-    
+
     private async Task CleanupLoop(CancellationToken token)
     {
         try
         {
             while (!token.IsCancellationRequested)
             {
-                TimeSpan delay = CalculateDelayToNextRun(0, 10); // Час: 0, Минуты: 10
-
-                /*_logger.LogInformation("Наступна очистка запланована через {Time} (о {Date})", 
-                    delay, DateTime.Now.Add(delay));*/
-                
+                TimeSpan delay = CalculateDelayToNextRun(0, 10);
                 await Task.Delay(delay, token);
-                
                 CleanUpOldFiles(_months);
             }
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Планувальник очистки зупинено.");
+            _logger.LogInformation("Планувальник очистки OneDrive зупинено.");
         }
         catch (Exception ex)
         {
@@ -81,45 +75,21 @@ public class OneDriveService : IOneDriveService
             await Task.Delay(TimeSpan.FromMinutes(5), CancellationToken.None);
         }
     }
-    
-    private TimeSpan CalculateDelayToNextRun(int targetHour, int targetMinute)
-    {
-        DateTime now = DateTime.Now;
-        // Берем сегодняшнюю дату и ставим нужное время
-        DateTime nextRun = now.Date.AddHours(targetHour).AddMinutes(targetMinute);
-
-        // Если это время сегодня уже прошло, переносим на завтра
-        if (now >= nextRun)
-        {
-            nextRun = nextRun.AddDays(1);
-        }
-
-        return nextRun - now;
-    }
 
     private void CleanUpOldFiles(int monthsToKeep)
     {
         if (string.IsNullOrEmpty(_rootPath) || !Directory.Exists(_rootPath)) return;
-        //_logger.LogInformation("Починаю очистку старих файлів OneDrive (старше {M} міс)...", monthsToKeep);
-        DateTime cutoffDate = DateTime.Now.AddMonths(-monthsToKeep);
+
+        DateTime cutoff = DateTime.Now.AddMonths(-monthsToKeep);
         try
         {
-            var files = Directory.GetFiles(_rootPath, "*.*", SearchOption.AllDirectories);
-
-            foreach (var file in files)
+            foreach (var file in Directory.GetFiles(_rootPath, "*.*", SearchOption.AllDirectories))
             {
-                var fileInfo = new FileInfo(file);
-                
-                if (fileInfo.LastWriteTime < cutoffDate)
+                var info = new FileInfo(file);
+                if (info.LastWriteTime < cutoff)
                 {
-                    try
-                    {
-                        fileInfo.Delete();
-                    }
-                    catch (Exception delEx)
-                    {
-                        _logger.LogWarning("Не вдалося видалити старий файл {File}: {Msg}", fileInfo.Name, delEx.Message);
-                    }
+                    try { info.Delete(); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Не вдалося видалити {File}", info.Name); }
                 }
             }
         }
@@ -127,5 +97,21 @@ public class OneDriveService : IOneDriveService
         {
             _logger.LogError(ex, "Помилка при очистці OneDrive");
         }
+    }
+
+    private static TimeSpan CalculateDelayToNextRun(int targetHour, int targetMinute)
+    {
+        var now = DateTime.Now;
+        var nextRun = now.Date.AddHours(targetHour).AddMinutes(targetMinute);
+        if (now >= nextRun) nextRun = nextRun.AddDays(1);
+        return nextRun - now;
+    }
+
+    private void EnsureConfig()
+    {
+        if (_rootPath != null) return;
+        var config = _configRepository.GetOneDriveConfig();
+        _rootPath = config.Path;
+        _months = config.Months;
     }
 }

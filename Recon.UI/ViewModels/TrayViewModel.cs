@@ -1,10 +1,9 @@
-﻿using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Options;
 using Recon.Core.Services;
 
@@ -12,282 +11,197 @@ namespace Recon.UI.ViewModels;
 
 public partial class TrayViewModel : ObservableObject
 {
-    private DateTime _appStartTime;
-    private DispatcherTimer _uptimeTimer;
-    private string _uptimeStr;
-    
     private readonly IIntegrationService _integrationService;
     private readonly ConfigMonitorService _configMonitor;
     private readonly IFtpService _ftpService;
     private readonly IMailService _mailService;
     private readonly IOneDriveService _oneDriveService;
-    private readonly IDatabaseService _dbService;
+    private readonly IConfigRepository _configRepository;
+    private readonly IUserRepository _userRepository;
+    private readonly IFileDataRepository _fileDataRepository;
     private readonly IStatisticsService _stats;
     private readonly OneDrivePermissonService _oneDrivePermissionService;
-    private DispatcherTimer _timer;
-    
-    private string _statsButtonContent;
-    public string StatsButtonContent
-    {
-        get => _statsButtonContent;
-        set { _statsButtonContent = value; OnPropertyChanged(); }
-    }
 
-    private bool _dbIsFull;
+    private DateTime _appStartTime;
+    private DispatcherTimer _uptimeTimer = null!;
     private bool _fastDatabaseBuild;
     private bool _isInitializing;
     private bool _isSyncingWithDb;
-    
-    [ObservableProperty]
-    private string _version;
-    
-    [ObservableProperty]
-    private string _progress;
-    
-    [ObservableProperty]
-    private bool _isFtpActive;
-    
-    [ObservableProperty]
-    private bool _isIntegrationActive;
-    
-    [ObservableProperty]
-    private bool _isMailActive;
-    
-    [ObservableProperty]
-    private bool _isOneDriveActive;
 
-    public TrayViewModel(IFtpService ftpService, 
-        IMailService mailService, 
-        IOneDriveService oneDriveService, 
-        IIntegrationService integrationService,
-        IDatabaseService dbService,
-        ConfigMonitorService configMonitor,
-        IStatisticsService stats,
+    [ObservableProperty] private string _version = string.Empty;
+    [ObservableProperty] private string _progress = string.Empty;
+    [ObservableProperty] private bool _isFtpActive;
+    [ObservableProperty] private bool _isIntegrationActive;
+    [ObservableProperty] private bool _isMailActive;
+    [ObservableProperty] private bool _isOneDriveActive;
+
+    private string _uptimeStr = string.Empty;
+    public string UptimeStr
+    {
+        get => _uptimeStr;
+        set { _uptimeStr = value; OnPropertyChanged(); }
+    }
+
+    public TrayViewModel(IFtpService ftpService, IMailService mailService, IOneDriveService oneDriveService,
+        IIntegrationService integrationService, IConfigRepository configRepository,
+        IUserRepository userRepository, IFileDataRepository fileDataRepository,
+        ConfigMonitorService configMonitor, IStatisticsService stats,
         OneDrivePermissonService oneDrivePermissonService)
     {
-        _stats = stats;
         _ftpService = ftpService;
         _mailService = mailService;
         _oneDriveService = oneDriveService;
         _integrationService = integrationService;
-        _dbService = dbService;
-        _oneDrivePermissionService = oneDrivePermissonService;
-        
+        _configRepository = configRepository;
+        _userRepository = userRepository;
+        _fileDataRepository = fileDataRepository;
         _configMonitor = configMonitor;
+        _stats = stats;
+        _oneDrivePermissionService = oneDrivePermissonService;
+
         _configMonitor.OnConfigChanged += OnRemoteConfigReceived;
         _configMonitor.StartMonitoring();
 
-        IsFtpActive = false;
-        IsIntegrationActive = false;
-        IsMailActive = false;
-        IsOneDriveActive = false;
-        Version = "v. 1.1.2 від 07.06.2026";
+        Version = "v. 1.2.0";
         _isInitializing = true;
-        
         _appStartTime = DateTime.Now;
 
-        _uptimeTimer = new DispatcherTimer();
-        _uptimeTimer.Interval = TimeSpan.FromSeconds(1);
-        _uptimeTimer.Tick += (s, e) => UpdateUptime();
+        _uptimeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _uptimeTimer.Tick += (_, _) => UpdateUptime();
         _uptimeTimer.Start();
-
         UpdateUptime();
-        
+
         LoadModuleStates();
-        
         _isInitializing = false;
-        
         RunModules();
     }
-    
-    public string UptimeStr
-    {
-        get => _uptimeStr;
-        set
-        {
-            _uptimeStr = value;
-            OnPropertyChanged(nameof(UptimeStr));
-        }
-    }
 
-    public void UpdateUptime()
+    private void UpdateUptime()
     {
-        DateTime now = DateTime.Now;
-
-        DateTime calcDate = _appStartTime;
+        var now = DateTime.Now;
+        var calc = _appStartTime;
         int months = 0;
-
-        while (calcDate.AddMonths(1) <= now)
-        {
-            months++;
-            calcDate = calcDate.AddMonths(1);
-        }
-
-        TimeSpan diff = now - calcDate;
-
+        while (calc.AddMonths(1) <= now) { months++; calc = calc.AddMonths(1); }
+        var diff = now - calc;
         UptimeStr = $"Час роботи: {months} міс. {diff.Days} дн. {diff.Hours} год. {diff.Minutes} хв. {diff.Seconds} сек.";
     }
-    
+
     [RelayCommand]
     private async Task NotifyAll()
     {
         string message = ShowInputDialog("Введіть повідомлення для користувачів:");
-        
         if (string.IsNullOrWhiteSpace(message)) return;
-        
-        var users = _dbService.GetAllUserEmails();
-        
+
+        var users = _userRepository.GetAllUserEmails();
         if (users.Count == 0)
         {
             MessageBox.Show("Немає активних користувачів для розсилки.");
             return;
         }
-        
-        await Task.Run(async () =>
-        {
-            await _mailService.SendToAllAsync(users, "Нове повідомленя від адміністратора", message);
-        });
-        
-        MessageBox.Show("Повідомлення успішно розіслані!"); 
+
+        await _mailService.SendToAllAsync(users, "Нове повідомлення від адміністратора", message);
+        MessageBox.Show("Повідомлення успішно розіслані!");
     }
-    
+
     [RelayCommand]
-    private void ExitApp()
-    {
-        Application.Current.Shutdown();
-    }
-    
+    private void ExitApp() => Application.Current.Shutdown();
+
     [RelayCommand]
     private async Task RebuildDatabase()
     {
-        var wantRebuild = MessageBox.Show(
-            "Ви впевнені, що хочете повністю очистити базу даних?\nВсі дані будуть втрачені.", 
-            "Підтвердження", 
-            MessageBoxButton.YesNo, 
-            MessageBoxImage.Warning);
-        
-        if(wantRebuild == MessageBoxResult.No) return;
-        
-        var isFastReBuild = MessageBox.Show(
-            "Використати прискорену збірку бази? (Тільки нові файли)", 
-            "Спосіб перезбірки", 
-            MessageBoxButton.YesNo, 
-            MessageBoxImage.Question);
+        var confirm = MessageBox.Show(
+            "Ви впевнені, що хочете повністю очистити базу даних?\nВсі дані будуть втрачені.",
+            "Підтвердження", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (confirm == MessageBoxResult.No) return;
 
-        _fastDatabaseBuild = isFastReBuild == MessageBoxResult.Yes;
+        var fastBuildAnswer = MessageBox.Show(
+            "Використати прискорену збірку бази? (Тільки нові файли)",
+            "Спосіб перезбірки", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        _fastDatabaseBuild = fastBuildAnswer == MessageBoxResult.Yes;
         _integrationService.SetFastBuild(_fastDatabaseBuild);
-        
+
         IsIntegrationActive = false;
         await _integrationService.StopIntegration();
-        try 
-        {
-            await _dbService.RebuildDatabaseAsync();
-            
-            var config = _dbService.GetModuleConfig();
-            config.DbIsFull = false;
-            _dbService.SaveModuleConfig(config);
-            
-            var wantStartIntegration = MessageBox.Show(
-                "Базу даних було успішно очищено.\nЗапустити модуль інтеграції файлів?",
-                "Успіх", 
-                MessageBoxButton.YesNo, 
-                MessageBoxImage.Information);
 
-            if (wantStartIntegration == MessageBoxResult.Yes)
+        try
+        {
+            await _fileDataRepository.RebuildDatabaseAsync();
+
+            var config = _configRepository.GetModuleConfig();
+            config.DbIsFull = false;
+            _configRepository.SaveModuleConfig(config);
+
+            var start = MessageBox.Show(
+                "Базу даних успішно очищено.\nЗапустити модуль інтеграції файлів?",
+                "Успіх", MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+            if (start == MessageBoxResult.Yes)
             {
                 _integrationService.SetFastBuild(_fastDatabaseBuild);
-                
-                var progressReporter = CreateProgressReporter(); 
-                _integrationService.StartIntegration(progressReporter);
+                _integrationService.StartIntegration(CreateProgressReporter());
                 IsIntegrationActive = true;
-            } 
+            }
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Помилка: {ex.Message}", "Помилка", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
-    
-    // methods
+
     private void RunModules()
     {
         var progressReporter = CreateProgressReporter();
         progressReporter.Report(0);
+
         if (IsIntegrationActive) _integrationService.StartIntegration(progressReporter);
         if (IsFtpActive) _ftpService.StartFTP();
-        
+
         _oneDriveService.StartCleanupScheduler();
         _mailService.StartSendingLoop();
         _oneDrivePermissionService.StartMonitoring();
     }
-    
-    private IProgress<int> CreateProgressReporter()
-    {
-        return new Progress<int>(percent => 
-        {
-            Progress = $"Інтеграція: {percent}%"; 
-        });
-    }
+
+    private IProgress<int> CreateProgressReporter() =>
+        new Progress<int>(percent => Progress = $"Інтеграція: {percent}%");
 
     private void LoadModuleStates()
     {
-        var config = _dbService.GetModuleConfig();
-        
+        var config = _configRepository.GetModuleConfig();
         IsFtpActive = config.IsFtpActive;
         IsIntegrationActive = config.IsIntegrationActive;
         IsMailActive = config.IsMailActive;
         IsOneDriveActive = config.IsOneDriveActive;
-        _dbIsFull = config.DbIsFull;
         _fastDatabaseBuild = config.FastDatabaseBuild;
     }
 
     private void SaveCurrentState()
     {
-        var config = new ModuleConfig
+        _configRepository.SaveModuleConfig(new ModuleConfig
         {
             IsFtpActive = IsFtpActive,
             IsIntegrationActive = IsIntegrationActive,
             IsMailActive = IsMailActive,
             IsOneDriveActive = IsOneDriveActive,
             FastDatabaseBuild = _fastDatabaseBuild,
-            DbIsFull = _dbIsFull
-        };
-
-        _dbService.SaveModuleConfig(config);
+            DbIsFull = _configRepository.GetModuleConfig().DbIsFull
+        });
     }
-    
+
     private string ShowInputDialog(string prompt)
     {
         var inputWindow = new InputWindow(prompt);
-        
-        bool? result = inputWindow.ShowDialog();
-
-        if (result == true)
-        {
-            return inputWindow.ResponseText;
-        }
-
-        return string.Empty; 
+        return inputWindow.ShowDialog() == true ? inputWindow.ResponseText : string.Empty;
     }
-    
+
     private void OnRemoteConfigReceived(ModuleConfig remoteConfig)
     {
         Application.Current.Dispatcher.Invoke(() =>
         {
             _isSyncingWithDb = true;
-            
-            if (IsFtpActive != remoteConfig.IsFtpActive)
-                IsFtpActive = remoteConfig.IsFtpActive;
-
-            if (IsIntegrationActive != remoteConfig.IsIntegrationActive)
-                IsIntegrationActive = remoteConfig.IsIntegrationActive;
-
-            if (IsMailActive != remoteConfig.IsMailActive)
-                IsMailActive = remoteConfig.IsMailActive;
-                
-            if (IsOneDriveActive != remoteConfig.IsOneDriveActive)
-                IsOneDriveActive = remoteConfig.IsOneDriveActive;
-            
+            if (IsFtpActive != remoteConfig.IsFtpActive) IsFtpActive = remoteConfig.IsFtpActive;
+            if (IsIntegrationActive != remoteConfig.IsIntegrationActive) IsIntegrationActive = remoteConfig.IsIntegrationActive;
+            if (IsMailActive != remoteConfig.IsMailActive) IsMailActive = remoteConfig.IsMailActive;
+            if (IsOneDriveActive != remoteConfig.IsOneDriveActive) IsOneDriveActive = remoteConfig.IsOneDriveActive;
             _isSyncingWithDb = false;
         });
     }
@@ -296,27 +210,19 @@ public partial class TrayViewModel : ObservableObject
     {
         if (_isSyncingWithDb || _isInitializing) return;
         SaveCurrentState();
-
-        if (value)
-        {
-            _ftpService.StartFTP();
-        }
-        else
-        {
-            _ftpService.StopFTP();
-        }
+        if (value) _ftpService.StartFTP();
+        else _ftpService.StopFTP();
     }
 
     partial void OnIsIntegrationActiveChanged(bool value)
     {
         if (_isSyncingWithDb || _isInitializing) return;
         SaveCurrentState();
-
         if (value)
         {
-            var progressReporter = CreateProgressReporter();
-            progressReporter.Report(0);
-            _integrationService.StartIntegration(progressReporter);
+            var reporter = CreateProgressReporter();
+            reporter.Report(0);
+            _integrationService.StartIntegration(reporter);
         }
         else
         {
@@ -327,15 +233,12 @@ public partial class TrayViewModel : ObservableObject
     partial void OnIsMailActiveChanged(bool value)
     {
         if (_isSyncingWithDb || _isInitializing) return;
-        
         SaveCurrentState();
     }
 
     partial void OnIsOneDriveActiveChanged(bool value)
     {
         if (_isSyncingWithDb || _isInitializing) return;
-        
         SaveCurrentState();
     }
-    
 }
