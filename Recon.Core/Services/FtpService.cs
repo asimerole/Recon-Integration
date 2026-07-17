@@ -7,6 +7,7 @@ using Recon.Core.Enums;
 using Recon.Core.Interfaces;
 using Recon.Core.Models;
 using Recon.Core.Options;
+using System.IO;
 
 namespace Recon.Core.Services;
 
@@ -328,5 +329,10 @@ public class FtpService : IFtpService
         {
             _logger.LogWarning("Мета-файл не створено: {Msg}", ex.Message);
         }
+    }
+
+    private async Task CheckConnection(ServerInfo server)
+    {
+        
     }
 }

@@ -3,7 +3,7 @@ using System.Text;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;
-using Microsoft.Graph;
+using System.IO;
 using MimeKit;
 using Recon.Core.Interfaces;
 using Recon.Core.Models;

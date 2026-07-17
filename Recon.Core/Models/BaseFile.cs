@@ -1,4 +1,6 @@
-﻿namespace Recon.Core.Models;
+﻿using System.IO;
+
+namespace Recon.Core.Models;
 
 public abstract class BaseFile
 {

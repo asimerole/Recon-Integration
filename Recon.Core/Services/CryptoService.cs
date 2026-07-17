@@ -1,6 +1,7 @@
 ﻿using Recon.Core.Interfaces;
 using System.Security.Cryptography;
 using System.Text;
+using System.IO;
 using Recon.Core.Keys;
 
 namespace Recon.Core.Services;
@@ -12,12 +13,18 @@ public class CryptoService : ICryptoService
     
     public string DecryptConfig(string fullPath)
     {
-        var encryptedBytes = File.ReadAllBytes(fullPath);
+        var fileBytes = File.ReadAllBytes(fullPath);
+
+        byte[] fileIv = new byte[16];
+        Array.Copy(fileBytes, 0, fileIv, 0, 16);
+
+        byte[] encryptedBytes = new byte[fileBytes.Length - 16];
+        Array.Copy(fileBytes, 16, encryptedBytes, 0, encryptedBytes.Length);
 
         using (var aes = Aes.Create())
         {
-            aes.Key = Key;
-            aes.IV = IV;
+            aes.Key = Key; 
+            aes.IV = fileIv; 
             aes.Mode = CipherMode.CBC;
             aes.Padding = PaddingMode.PKCS7;
 

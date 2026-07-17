@@ -4,6 +4,7 @@ using Recon.Core.Enums;
 using Recon.Core.Interfaces;
 using Recon.Core.Options;
 using Microsoft.Extensions.Logging;
+using Recon.Core.Models;
 
 namespace Recon.Core.Services;
 
@@ -67,7 +68,42 @@ public class StatisticsService : IStatisticsService
             return (list.Count, _dailyCounters[type]);
         }
     }
-    
+
+    public string CheckDailyFileByServer(ServerInfo server)
+    {
+        var now = DateTime.Now;
+        var oneDayAgo = now.AddDays(-1);
+        var twoDaysAgo = now.AddDays(-2);
+        var moreThanTwoDaysAgo = now.AddDays(-3);
+
+        var lastTime = server.LastDailyFileDate;
+
+        if (lastTime < moreThanTwoDaysAgo)
+        {
+            return $"проблеми з регістратором №{server.ReconId} (DAILY файлу не було більше 2 днів).";
+        }
+
+        if (lastTime < twoDaysAgo)
+        {
+            return $"проблеми з регістратором №{server.ReconId} (файлу DAILY нема вже 2 дні).";
+        }
+
+        if (lastTime < oneDayAgo)
+        {
+            return "TotalFailure";
+        }
+        return string.Empty;
+    }
+
+    public Dictionary<string, ErrorDetails> GetUnreachableServers(List<ServerInfo> servers)
+    {
+        var unreachableServers = new Dictionary<string, ErrorDetails>();
+        foreach (var server in servers)
+        {
+            
+        }
+        return null;
+    }
     public async Task<bool> SendAnalyticsToUsers(MailServerConfig config)
     {
         bool allSuccessed = true;

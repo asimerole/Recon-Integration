@@ -220,26 +220,20 @@ public class DatabaseService : IDatabaseService
         {
             using (var connection = new SqlConnection(_connectionString))
             {
-                int timeoutSeconds = 300; 
+                int timeoutSeconds = 600; // 10 минут
 
-                string sql = @"
-                BEGIN TRANSACTION;
-                    DELETE FROM [data];
-                    DELETE FROM [struct_units];
-                    DELETE FROM [struct];
-                    DELETE FROM [units];          
-                    DBCC CHECKIDENT ('[units]', RESEED, 0);
-                    DBCC CHECKIDENT ('[struct]', RESEED, 0);
-                    DBCC CHECKIDENT ('[data]', RESEED, 0);
-                COMMIT;";
+                await connection.ExecuteAsync(
+                    "[dbo].[sp_RebuildDatabase]", 
+                    commandType: CommandType.StoredProcedure,
+                    commandTimeout: timeoutSeconds
+                );
             
-                
-                await connection.ExecuteAsync(sql, commandTimeout: timeoutSeconds);
+                _logger.LogInformation("Database rebuilt successfully");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Помилка при очищенні бази даних");
+            _logger.LogError(ex, "Error rebuilding database");
             throw; 
         }
     }

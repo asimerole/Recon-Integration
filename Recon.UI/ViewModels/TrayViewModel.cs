@@ -4,11 +4,9 @@ using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Recon.Core.Enums;
 using Recon.Core.Interfaces;
 using Recon.Core.Options;
 using Recon.Core.Services;
-
 
 namespace Recon.UI.ViewModels;
 
@@ -35,10 +33,10 @@ public partial class TrayViewModel : ObservableObject
         set { _statsButtonContent = value; OnPropertyChanged(); }
     }
 
-    private bool _dbIsFull = false;
-    private bool _fastDatabaseBuild = false;
-    private bool _isInitializing = false;
-    private bool _isSyncingWithDb = false;
+    private bool _dbIsFull;
+    private bool _fastDatabaseBuild;
+    private bool _isInitializing;
+    private bool _isSyncingWithDb;
     
     [ObservableProperty]
     private string _version;
@@ -83,18 +81,16 @@ public partial class TrayViewModel : ObservableObject
         IsIntegrationActive = false;
         IsMailActive = false;
         IsOneDriveActive = false;
-        Version = "v. 1.1.2 від 04.02.2025";
+        Version = "v. 1.1.2 від 07.06.2026";
         _isInitializing = true;
         
         _appStartTime = DateTime.Now;
 
-        // 2. Настраиваем таймер (тикает каждую секунду)
-        /*_uptimeTimer = new DispatcherTimer();
+        _uptimeTimer = new DispatcherTimer();
         _uptimeTimer.Interval = TimeSpan.FromSeconds(1);
         _uptimeTimer.Tick += (s, e) => UpdateUptime();
-        _uptimeTimer.Start();*/
+        _uptimeTimer.Start();
 
-        // 3. Сразу инициализируем текст
         UpdateUptime();
         
         LoadModuleStates();
@@ -110,20 +106,26 @@ public partial class TrayViewModel : ObservableObject
         set
         {
             _uptimeStr = value;
-            OnPropertyChanged();
+            OnPropertyChanged(nameof(UptimeStr));
         }
     }
 
-    private void UpdateUptime()
+    public void UpdateUptime()
     {
-        var timeSpan = DateTime.Now - _appStartTime;
-        UptimeStr = $"Час роботи: {timeSpan:dd\\.hh\\:mm\\:ss}";
-    }
-    
-    public event PropertyChangedEventHandler PropertyChanged;
-    protected void OnPropertyChanged([CallerMemberName] string name = null)
-    {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        DateTime now = DateTime.Now;
+
+        DateTime calcDate = _appStartTime;
+        int months = 0;
+
+        while (calcDate.AddMonths(1) <= now)
+        {
+            months++;
+            calcDate = calcDate.AddMonths(1);
+        }
+
+        TimeSpan diff = now - calcDate;
+
+        UptimeStr = $"Час роботи: {months} міс. {diff.Days} дн. {diff.Hours} год. {diff.Minutes} хв. {diff.Seconds} сек.";
     }
     
     [RelayCommand]

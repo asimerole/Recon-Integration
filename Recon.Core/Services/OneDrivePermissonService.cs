@@ -7,6 +7,7 @@ using Recon.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 using Recon.Core.Models;
 using Recon.Core.Options;
+using System.IO;
 
 namespace Recon.Core.Services;
 
@@ -52,7 +53,7 @@ public class OneDrivePermissonService
         string normOneDrive = NormalizePath(localOneDrivePath);
         string normSource = NormalizePath(sourceRootPath);
         
-        // 2. Економія ресурсів: якщо налаштування ті ж самі - виходимо
+        // Економія ресурсів: якщо налаштування ті ж самі - виходимо
         if (_graphClient != null && 
             _currentConfig != null &&
             _currentConfig.ClientId == config.ClientId &&
@@ -61,17 +62,17 @@ public class OneDrivePermissonService
             _localRootFullPath == localOneDrivePath &&
             _adminEmail == config.AdminEmail)
         {
-            return; // Все вже налаштовано, нічого не змінюємо
+            return;
         }
 
-        // 3. Оновлюємо локальні поля
+        // Оновлюємо локальні поля
         _currentConfig = config;
         _adminEmail = config.AdminEmail;
         
         _localRootFullPath = normSource;
         _cloudRootFolderName = Path.GetFileName(normOneDrive);   
         
-        // 4. Створюємо клієнта
+        // Створюємо клієнта
         var options = new ClientSecretCredentialOptions
         {
             AuthorityHost = AzureAuthorityHosts.AzurePublicCloud
@@ -137,10 +138,10 @@ private async Task WorkerLoop(CancellationToken token)
             foreach (var user in usersToGrant)
             {
                 if (token.IsCancellationRequested) break;
-
+                
                 // Отримуємо відфільтровані шляхи (вже з урахуванням Admin/User)
-                var pathsToProcess = GetPathsForUser(user);
-
+                var pathsToProcess = await SyncUserPermissionsAsync(user);
+                
                 _logger.LogInformation($"[{cycleId}] [GRANT] Обробка User: {user.Email} (ID: {user.UserId}). " +
                                        $"Роль: {(user.IsAdmin ? "ADMIN" : "USER")}. " +
                                        $"Знайдено унікальних шляхів: {pathsToProcess.Count}");
@@ -191,61 +192,36 @@ private async Task WorkerLoop(CancellationToken token)
 
         _logger.LogInformation($"[{cycleId}] === ЦИКЛ ЗАВЕРШЕНО. Очікування 1 хв... ===");
         
-        // Чекаємо 1 хвилину перед наступною перевіркою
         await Task.Delay(TimeSpan.FromMinutes(1), token);
     }
     }
-    private async Task SyncUserPermissionsAsync(UserAccessDto user, string cycleId)
-{   
-        // 1. Визначаємо кореневу папку (якір)
-        // Нам треба знати шлях до папки "ОСП", щоб видавати або забирати права адміну
-        // Припускаємо, що rootPath в методі ConvertLocalPathToCloudPath повертає шлях, що починається з ОСП
-        // Або можна захардкодити, якщо структура стабільна: "ОСП"
-        string adminRootFolder = "ОСП"; 
-        
-        if (user.IsAdmin)
+    private async Task<HashSet<string>> SyncUserPermissionsAsync(UserAccessDto user)
+    {
+        if (user.IsAdmin )
         {
-            _logger.LogInformation($"[{cycleId}] User {user.Email} is ADMIN. Syncing full access...");
-        
-            // КРОК 1 (Адмін): Даємо доступ до кореня
-            // Трюк: ConvertLocalPathToCloudPath поверне шлях відносно кореня. 
-            // Нам треба просто переконатися, що ми шаримо папку "ОСП".
-            // Якщо у вас fullLocalPath веде до файлу, ми можемо взяти просто const string "ОСП".
+            return GetPathsForUser(user);
             
-            await GrantAccessAsync(user.Email, user.UserId, adminRootFolder);
-        
-            // КРОК 2 (Адмін): Чистимо сміття
-            // Якщо він раніше був юзером, у нього можуть висіти доступи до "ОСП/Південь/Підстанція1"
-            // Їх краще прибрати, щоб у нього в "Shared" була одна красива папка, а не 100 штук.
-            // Але це опціонально (можна і залишити, воно не заважає доступу, тільки візуально).
-            // Для чистоти експерименту - залишаємо поки як є, адмін побачить все через корінь.
         }
         else
         {
-            _logger.LogInformation($"[{cycleId}] User {user.Email} is REGULAR USER. Syncing limited access...");
+            user.IsAdmin = true;
+            var paths = GetPathsForUser(user);
         
-            // КРОК 1 (Юзер): ГАРАНТОВАНО ЗАБИРАЄМО доступ до кореня (якщо він був адміном)
-            await RevokeAccessAsync(user.Email, user.UserId, adminRootFolder);
-        
-            // КРОК 2 (Юзер): Видаємо доступ тільки до його списку
-            var pathsToProcess = GetPathsForUser(user); // Цей метод ми писали раніше, він повертає повні шляхи для юзера
-        
-            foreach (var cloudPath in pathsToProcess)
+            foreach (var path in paths)
             {
-                await GrantAccessAsync(user.Email, user.UserId, cloudPath);
+                await RevokeAccessAsync(user.Email, user.UserId, path);    
             }
-            
-            // КРОК 3 (Юзер - опціонально): Перевірка "зайвих" прав
-            // В ідеалі треба перевірити, чи є у нього доступи до папок, яких НЕМАЄ в списку pathsToProcess, і забрати їх.
-            // Але Graph API не дає швидко отримати "все, до чого юзер має доступ".
-            // Тому ми покладаємось на те, що RevokeAccessAsync(root) закрив глобальний доступ.
-            // А точкові права ми видали в циклі вище.
+        
+            user.IsAdmin = false;
+            //paths = GetPathsForUser(user); // for test. but in release should be uncomm..
+            return paths;
         }
+       return new HashSet<string>();
     }
     
     public async Task GrantAccessAsync(string userEmail, int userId, string fullLocalPath)
     {
-        // 5. Захист від виклику до ініціалізації
+        // Захист від виклику до ініціалізації
         if (_graphClient == null)
         {
             _logger.LogError("[OneDriveService] Помилка: Сервіс не ініціалізовано. Спочатку викличте Initialize().");

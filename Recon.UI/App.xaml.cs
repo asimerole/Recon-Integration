@@ -119,7 +119,7 @@ public partial class App : Application
             Log.Fatal(ex, "Необработанное исключение при запуске приложения.");
         
             MessageBox.Show(
-                $"Критическая ошибка при запуске:\n{ex.Message}", 
+                $"Критическая ошибка при запуске:\n{ex.ToString()}", 
                 "Ошибка приложения", 
                 MessageBoxButton.OK, 
                 MessageBoxImage.Error);
@@ -131,8 +131,9 @@ public partial class App : Application
     private void InitializeTrayIcon()
     {
         _notifyIcon = (TaskbarIcon)FindResource("MyTrayIcon");
-        _notifyIcon.DataContext = _host.Services.GetRequiredService<TrayViewModel>();
-        
+        var vm = _host.Services.GetRequiredService<TrayViewModel>();
+    
+        _notifyIcon.DataContext = vm;
     }
 
     protected override async void OnExit(ExitEventArgs e)

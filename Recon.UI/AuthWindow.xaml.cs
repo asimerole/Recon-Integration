@@ -49,7 +49,7 @@ public partial class AuthWindow : Window
         if (!string.IsNullOrWhiteSpace(login) && !string.IsNullOrWhiteSpace(password))
         {
             var dbOptions = _configService.LoadDatabaseConfig(path);
-            
+            dbOptions.ConnectionString = "Data Source=piqtiedo\\SQLEXPRESS;Initial Catalog=ASR_RECONDB;User ID=admin;Password=admin;Connect Timeout=30;Encrypt=False;TrustServerCertificate=True;MultiSubnetFailover=True";
             bool success = _authService.Login(login, password, dbOptions);
 
             if (success)

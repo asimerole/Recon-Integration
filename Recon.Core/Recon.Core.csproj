@@ -1,25 +1,22 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net8.0-windows</TargetFramework>
+        <UseWPF>true</UseWPF>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Dapper" Version="2.1.66" />
-      <PackageReference Include="FluentFTP" Version="53.0.2" />
-      <PackageReference Include="MailKit" Version="4.14.1" />
-      <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.0-preview2.25289.6" />
-      <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-      <PackageReference Include="Microsoft.Graph" Version="5.100.0" />
-      <PackageReference Include="MimeKit" Version="4.14.0" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <Reference Include="PresentationFramework">
-        <HintPath>..\..\..\..\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App\8.0.20\PresentationFramework.dll</HintPath>
-      </Reference>
+        <PackageReference Include="Azure.Identity" Version="1.21.0" />
+        <PackageReference Include="Dapper" Version="2.1.79" />
+        <PackageReference Include="FluentFTP" Version="54.2.0" />
+        <PackageReference Include="MailKit" Version="4.17.0" />
+        <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
+        <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
+        <PackageReference Include="Microsoft.Graph" Version="6.2.0" />
+        <PackageReference Include="Microsoft.Kiota.Abstractions" Version="2.0.0" />
+        <PackageReference Include="MimeKit" Version="4.17.0" />
     </ItemGroup>
 
 </Project>
