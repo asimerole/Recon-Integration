@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Threading;
@@ -81,7 +82,10 @@ public partial class TrayViewModel : ObservableObject
         IsIntegrationActive = false;
         IsMailActive = false;
         IsOneDriveActive = false;
-        Version = "v. 1.1.2 від 07.06.2026";
+        var buildDate = Assembly.GetExecutingAssembly()
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "BuildDate")?.Value ?? "?";
+        Version = $"v. 1.1.2 від {buildDate}";
         _isInitializing = true;
         
         _appStartTime = DateTime.Now;
