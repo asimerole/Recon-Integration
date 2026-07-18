@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Recon.Core.Enums;
 using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Models;
 using Recon.Core.Options;
 using System.IO;
@@ -13,25 +14,27 @@ namespace Recon.Core.Services;
 
 public class FtpService : IFtpService
 {
-    private readonly IDatabaseService _dbService;
+    private readonly IConfigRepository _configRepository;
+    private readonly IServerRepository _serverRepository;
     private readonly ILogger<FtpService> _logger;
     private readonly IOneDriveService _oneDriveService;
     private readonly IStatisticsService _statsService;
-    
+
     private string _ftpCacheDir;
     private OneDriveConfig _oneDriveConfig;
     private bool _isOneDriveActive;
-    
-    // Cancel token (our “kill switch”)
+
     private CancellationTokenSource? _cts;
     private Task? _workingTask;
 
-    public FtpService(IDatabaseService dbService, ILogger<FtpService> logger, IOneDriveService oneDriveService, IStatisticsService statsService)
+    public FtpService(IConfigRepository configRepository, IServerRepository serverRepository,
+        ILogger<FtpService> logger, IOneDriveService oneDriveService, IStatisticsService statsService)
     {
-        _statsService = statsService;
-        _dbService = dbService;
+        _configRepository = configRepository;
+        _serverRepository = serverRepository;
         _logger = logger;
         _oneDriveService = oneDriveService;
+        _statsService = statsService;
     }
     
     public void StartFTP()
@@ -58,32 +61,30 @@ public class FtpService : IFtpService
         {
             while (!token.IsCancellationRequested)
             {
-                var rootFolder = _dbService.GetRootFolder();
-                
-                List<ServerInfo> servers = _dbService.GetAllServers();
+                var rootFolder = await _configRepository.GetRootFolderAsync();
+
+                List<ServerInfo> servers = await _serverRepository.GetAllServersAsync();
 
                 _ftpCacheDir = rootFolder + @"/Cache";
                 if (!Directory.Exists(_ftpCacheDir))
-                {
                     Directory.CreateDirectory(_ftpCacheDir);
-                }
 
                 foreach (var server in servers)
                 {
                     if (token.IsCancellationRequested) break;
-                    
-                    var config = _dbService.GetModuleConfig();
+
+                    var config = await _configRepository.GetModuleConfigAsync();
                     if (!config.IsFtpActive) break;
-                    
+
                     _isOneDriveActive = config.IsOneDriveActive;
-                    _oneDriveConfig = _dbService.GetOneDriveConfig();
-                    
+                    _oneDriveConfig = await _configRepository.GetOneDriveConfigAsync();
+
                     CreateLocalDirectoryTree(server, rootFolder);
                     if (_isOneDriveActive) CreateLocalDirectoryTree(server, _oneDriveConfig.Path);
 
                     await ProcessServerAsync(server, token);
                 }
-                int feedingTime = _dbService.GetFeedingTime();
+                int feedingTime = await _configRepository.GetFeedingTimeAsync();
                 await Task.Delay(TimeSpan.FromSeconds(feedingTime), token);
             }
         }
@@ -212,7 +213,7 @@ public class FtpService : IFtpService
             
             if (status == FtpStatus.Success)
             {
-                await _dbService.UpdateDailyStatAsync(server.Id, "collected");
+                await _serverRepository.UpdateDailyStatAsync(server.Id, "collected");
                 
                 await HandleDownloadedFileAsync(tempLocalPath, item, server);
                 await client.DeleteFile(item.FullName);
@@ -231,11 +232,11 @@ public class FtpService : IFtpService
                         server.LastDailyFileDate = updateDailyTime.Value;
                 }
                 
-                await _dbService.UpdateServerStatusAsync(
-                    server.StructId, 
-                    lastPing: server.LastPingTime, 
-                    lastRecon: updateReconTime,   
-                    lastDaily: updateDailyTime     
+                await _serverRepository.UpdateServerStatusAsync(
+                    server.StructId,
+                    lastPing: server.LastPingTime,
+                    lastRecon: updateReconTime,
+                    lastDaily: updateDailyTime
                 );
                 
                 _statsService.RegisterAction(ServiceType.Ftp, 1);
@@ -247,7 +248,7 @@ public class FtpService : IFtpService
                         var relativePath = GetServerDirTree(server);
                         relativePath = Path.Combine(relativePath, item.Name);
                         _oneDriveService.CopyToOneDrive(tempLocalPath, relativePath);
-                        await _dbService.UpdateDailyStatAsync(server.Id, "uploaded");
+                        await _serverRepository.UpdateDailyStatAsync(server.Id, "uploaded");
                         _statsService.RegisterAction(ServiceType.OneDrive, 1);
                     }
                     catch (IOException ioEx)

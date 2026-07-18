@@ -7,19 +7,17 @@ using Recon.Core.Models;
 
 namespace Recon.UI.ViewModels;
 
-public class StatsViewModel 
+public class StatsViewModel
 {
     private readonly IStatisticsService _statsService;
-    private readonly IDatabaseService _dbService;
     private DispatcherTimer _timer;
 
     // Колекція для прив'язки до DataGrid
     public ObservableCollection<ServiceStatItem> StatItems { get; set; }
 
-    public StatsViewModel(IStatisticsService statsService, IDatabaseService dbService)
+    public StatsViewModel(IStatisticsService statsService)
     {
         _statsService = statsService;
-        _dbService = dbService;
 
         // Ініціалізуємо список (порядок рядків фіксований)
         StatItems = new ObservableCollection<ServiceStatItem>

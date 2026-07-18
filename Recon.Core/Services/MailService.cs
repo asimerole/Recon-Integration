@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using System.IO;
 using MimeKit;
 using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Models;
 using Recon.Core.Options;
 
@@ -14,25 +15,29 @@ namespace Recon.Core.Services;
 public class MailService : IMailService
 {
     private readonly ILogger<MailService> _logger;
-    private readonly MailServerConfig _config;
-    private readonly IDatabaseService _databaseService;
-    private readonly Dictionary<int, List<string>> _recipientsMap;
-    
+    private readonly IFileDataRepository _fileDataRepository;
+    private readonly IConfigRepository _configRepository;
+
+    private MailServerConfig _config = new();
     private readonly ConcurrentQueue<FilePair> _queue = new();
-    private Task _sendingTask;
+    private Task? _sendingTask;
     private CancellationTokenSource? _cts = new();
 
-    public MailService(ILogger<MailService> logger, IDatabaseService databaseService)
+    public MailService(ILogger<MailService> logger, IFileDataRepository fileDataRepository, IConfigRepository configRepository)
     {
         _logger = logger;
-        _config = databaseService.GetMailServerConfig();
-        _databaseService = databaseService;
+        _fileDataRepository = fileDataRepository;
+        _configRepository = configRepository;
     }
-    
+
     public void StartSendingLoop()
     {
         if (_sendingTask != null) return;
-        _sendingTask = Task.Run(SendingLoop);
+        _sendingTask = Task.Run(async () =>
+        {
+            _config = await _configRepository.GetMailServerConfigAsync();
+            await SendingLoop();
+        });
     }
     
     public void AddToQueue(FilePair pair)
@@ -73,7 +78,7 @@ public class MailService : IMailService
                 try 
                 {
                     // Отримуємо отримувачів для цього ID
-                    var recipients = await _databaseService.GetRecipientsByReconIdAsync(currentReconId);
+                    var recipients = await _fileDataRepository.GetRecipientsByReconIdAsync(currentReconId);
                     
                     if (recipients != null && recipients.Any())
                     {
@@ -208,7 +213,7 @@ public class MailService : IMailService
         {
             int reconId = group.Key;
             var filesInGroup = group.ToList();
-            var recipients = await _databaseService.GetRecipientsByReconIdAsync(reconId);
+            var recipients = await _fileDataRepository.GetRecipientsByReconIdAsync(reconId);
             
             if (recipients == null || !recipients.Any())
             {

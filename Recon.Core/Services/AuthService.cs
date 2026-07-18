@@ -1,37 +1,30 @@
-﻿using System.Security.Cryptography;
-using System.Text;
-using System.Windows;
+using Recon.Core.Infrastructure;
 using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Options;
 
 namespace Recon.Core.Services;
 
 public class AuthService : IAuthService
 {
-    private readonly IDatabaseService _dbService;
+    private readonly IUserRepository _userRepository;
+    private readonly IDbConnectionFactory _dbFactory;
+    private readonly ICryptoService _crypto;
 
-    public AuthService(IDatabaseService dbService)
+    public AuthService(IUserRepository userRepository, IDbConnectionFactory dbFactory, ICryptoService crypto)
     {
-        _dbService = dbService;
+        _userRepository = userRepository;
+        _dbFactory = dbFactory;
+        _crypto = crypto;
     }
-    public bool Login(string username, string password, DatabaseOptions dbOptions)
+
+    public async Task<bool> LoginAsync(string username, string password, DatabaseOptions dbOptions)
     {
-        _dbService.Initialize(dbOptions.ConnectionString);
-        
-        var user = _dbService.GetUserByLogin(username);
+        _dbFactory.SetConnectionString(dbOptions.ConnectionString);
 
-        if (user != null)
-        {
-            var cryptoService = new CryptoService();
-            var hashedPassword = cryptoService.SHA512(password);
+        var user = await _userRepository.GetUserByLoginAsync(username);
+        if (user == null) return false;
 
-            if (hashedPassword == user.PasswordHash.ToUpper())
-            {
-                return true;
-            }
-        }
-        
-        //MessageBox.Show("Користувача не було знайдено.","Увага!");
-        return false;
+        return _crypto.SHA512(password) == user.PasswordHash.ToUpper();
     }
 }

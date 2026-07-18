@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Recon.Core.Enums;
 using Recon.Core.Factories;
 using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Models;
 using System.IO;
 
@@ -11,7 +12,9 @@ namespace Recon.Core.Services;
 
 public class IntegrationService : IIntegrationService
 {
-    private readonly IDatabaseService _databaseService;
+    private readonly IFileDataRepository _fileDataRepository;
+    private readonly IConfigRepository _configRepository;
+    private readonly IServerRepository _serverRepository;
     private readonly ILogger<IIntegrationService> _logger;
     private readonly BrokenFileService _brokenFileService;
     private readonly IStatisticsService _statsService;
@@ -31,11 +34,15 @@ public class IntegrationService : IIntegrationService
     private CancellationTokenSource? _cts;
     private Task? _workingTask;
 
-    public IntegrationService(IDatabaseService databaseService, ILogger<IIntegrationService> logger, IStatisticsService statisticsService, IMailService mailService)
+    public IntegrationService(IFileDataRepository fileDataRepository, IConfigRepository configRepository,
+        IServerRepository serverRepository, ILogger<IIntegrationService> logger,
+        BrokenFileService brokenFileService, IStatisticsService statisticsService, IMailService mailService)
     {
-        _brokenFileService = new BrokenFileService(logger);
+        _fileDataRepository = fileDataRepository;
+        _configRepository = configRepository;
+        _serverRepository = serverRepository;
+        _brokenFileService = brokenFileService;
         _statsService = statisticsService;
-        _databaseService = databaseService;
         _mailService = mailService;
         _logger = logger;
     }
@@ -102,12 +109,12 @@ public class IntegrationService : IIntegrationService
         {
             try
             {
-                var rootFolder = _databaseService.GetRootFolder();
-                var pathToWinRec = _databaseService.GetWinrecPath();
+                var rootFolder = await _configRepository.GetRootFolderAsync();
+                var pathToWinRec = await _configRepository.GetWinrecPathAsync();
                 var pathToOmp = Path.Combine(pathToWinRec, "OMP_C");
-                if(string.IsNullOrEmpty(pathToWinRec) || string.IsNullOrEmpty(rootFolder)) continue;
-                
-                var config = _databaseService.GetModuleConfig();
+                if (string.IsNullOrEmpty(pathToWinRec) || string.IsNullOrEmpty(rootFolder)) continue;
+
+                var config = await _configRepository.GetModuleConfigAsync();
                 
                 var globalBatch = new List<FilePair>();
                 const int TransactionBatchSize = 500; 
@@ -118,7 +125,7 @@ public class IntegrationService : IIntegrationService
                     if (!token.IsCancellationRequested)
                     {
                         config.DbIsFull = true;
-                        _databaseService.SaveModuleConfig(config);
+                        await _configRepository.SaveModuleConfigAsync(config);
                     }
                 }
                 else
@@ -212,7 +219,7 @@ public class IntegrationService : IIntegrationService
             {
                 if (fileObj.ReconNumber > 0)
                 {
-                    targetFolder = await _databaseService.GetTargetFolderByReconIdAsync(fileObj.ReconNumber);
+                    targetFolder = await _fileDataRepository.GetTargetFolderByReconIdAsync(fileObj.ReconNumber);
         
                     if (!string.IsNullOrEmpty(targetFolder))
                     {
@@ -293,7 +300,7 @@ public class IntegrationService : IIntegrationService
         }
         if (globalBatch.Count > 0)
         {
-            await _databaseService.InsertBatchAsync(globalBatch);
+            await _fileDataRepository.InsertBatchAsync(globalBatch);
             globalBatch.Clear();
         }
     }
@@ -431,7 +438,7 @@ private async Task ProcessFullArchiveAsync(string rootFolder, string pathToWinRe
     }
     if (batch.Count > 0)
     {
-        await _databaseService.InsertBatchAsync(batch);
+        await _fileDataRepository.InsertBatchAsync(batch);
         batch.Clear();
     }
 }
@@ -619,7 +626,7 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
                 string unitName = string.Join(" - ", parts.Take(parts.Length - 2));
         
                 // Insert into DB
-                await _databaseService.EnsureStructureExistsAsync(
+                await _fileDataRepository.EnsureStructureExistsAsync(
                     unitName, 
                     substationName, 
                     objectName, 
@@ -777,12 +784,12 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
             await pair.Other!.ProcessAsync(rootFolder);
         }
 
-        await _databaseService.UpdateDailyStatAsync(pair.ServerId, "integrated");
+        await _serverRepository.UpdateDailyStatAsync(pair.ServerId, "integrated");
         
         globalBatch.Add(pair);
         if (globalBatch.Count >= transactionBatchSize)
         {
-            await _databaseService.InsertBatchAsync(globalBatch);
+            await _fileDataRepository.InsertBatchAsync(globalBatch);
             // Після успішного InsertBatchAsync
             _statsService.RegisterAction(ServiceType.Integration, globalBatch.Count);
             globalBatch.Clear();

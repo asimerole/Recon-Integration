@@ -1,35 +1,25 @@
-﻿using System.Collections.Concurrent;
-using Microsoft.Data.SqlClient;
+using System.Collections.Concurrent;
 using Recon.Core.Enums;
 using Recon.Core.Interfaces;
+using Recon.Core.Models;
 using Recon.Core.Options;
 using Microsoft.Extensions.Logging;
-using Recon.Core.Models;
 
 namespace Recon.Core.Services;
 
 public class StatisticsService : IStatisticsService
 {
-    // Dictionary: Key = Service, Value = List of event times
-    private readonly ConcurrentDictionary<ServiceType, List<DateTime>> _history 
-        = new ConcurrentDictionary<ServiceType, List<DateTime>>();
+    private readonly ConcurrentDictionary<ServiceType, List<DateTime>> _history = new();
+    private readonly ConcurrentDictionary<ServiceType, int> _dailyCounters = new();
+    private readonly object _lock = new();
+    private readonly ILogger<StatisticsService> _logger;
 
-    // Separate “Per day” meter (cumulative)
-    private readonly ConcurrentDictionary<ServiceType, int> _dailyCounters 
-        = new ConcurrentDictionary<ServiceType, int>();
-
-    private readonly object _lock = new object();
-
-    private readonly IDatabaseService _databaseService;
-    private readonly ILogger<OneDrivePermissonService> _logger;
-    public StatisticsService(IDatabaseService databaseService)
+    public StatisticsService(ILogger<StatisticsService> logger)
     {
-        _databaseService = databaseService;
-        
-        // Initialize empty lists
+        _logger = logger;
         foreach (ServiceType type in Enum.GetValues(typeof(ServiceType)))
         {
-            _history[type] = new List<DateTime>();
+            _history[type] = [];
             _dailyCounters[type] = 0;
         }
     }
@@ -39,32 +29,21 @@ public class StatisticsService : IStatisticsService
         lock (_lock)
         {
             var now = DateTime.Now;
-            
-            // 1. Add to history (for 2 hours)
             var list = _history[type];
             for (int i = 0; i < count; i++) list.Add(now);
-
-            // 2. Add “Per day”
             _dailyCounters[type] += count;
         }
     }
 
-    // This method is needed to “pull” the actual figure from the database for integration.
-    public void SetDailyCountFromDb(ServiceType type, int dbCount)
-    {
+    public void SetDailyCountFromDb(ServiceType type, int dbCount) =>
         _dailyCounters[type] = dbCount;
-    }
 
     public (int Last2Hours, int Today) GetStats(ServiceType type)
     {
         lock (_lock)
         {
             var list = _history[type];
-            var cutOff = DateTime.Now.AddHours(-2);
-
-            // Deleting old records (2-hour window)
-            list.RemoveAll(t => t < cutOff);
-
+            list.RemoveAll(t => t < DateTime.Now.AddHours(-2));
             return (list.Count, _dailyCounters[type]);
         }
     }
@@ -72,50 +51,20 @@ public class StatisticsService : IStatisticsService
     public string CheckDailyFileByServer(ServerInfo server)
     {
         var now = DateTime.Now;
-        var oneDayAgo = now.AddDays(-1);
-        var twoDaysAgo = now.AddDays(-2);
-        var moreThanTwoDaysAgo = now.AddDays(-3);
+        var last = server.LastDailyFileDate;
 
-        var lastTime = server.LastDailyFileDate;
-
-        if (lastTime < moreThanTwoDaysAgo)
-        {
-            return $"проблеми з регістратором №{server.ReconId} (DAILY файлу не було більше 2 днів).";
-        }
-
-        if (lastTime < twoDaysAgo)
-        {
-            return $"проблеми з регістратором №{server.ReconId} (файлу DAILY нема вже 2 дні).";
-        }
-
-        if (lastTime < oneDayAgo)
-        {
-            return "TotalFailure";
-        }
+        if (last < now.AddDays(-3)) return $"проблеми з регістратором №{server.ReconId} (DAILY файлу не було більше 2 днів).";
+        if (last < now.AddDays(-2)) return $"проблеми з регістратором №{server.ReconId} (файлу DAILY нема вже 2 дні).";
+        if (last < now.AddDays(-1)) return "TotalFailure";
         return string.Empty;
     }
 
-    public Dictionary<string, ErrorDetails> GetUnreachableServers(List<ServerInfo> servers)
-    {
-        var unreachableServers = new Dictionary<string, ErrorDetails>();
-        foreach (var server in servers)
-        {
-            
-        }
-        return null;
-    }
+    public Dictionary<string, ErrorDetails> GetUnreachableServers(List<ServerInfo> servers) => [];
+
     public async Task<bool> SendAnalyticsToUsers(MailServerConfig config)
     {
-        bool allSuccessed = true;
-        try
-        {
-            
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, ex.Message);
-        }
-
+        try { }
+        catch (Exception ex) { _logger.LogError(ex, ex.Message); }
         return false;
     }
 }

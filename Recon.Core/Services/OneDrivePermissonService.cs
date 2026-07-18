@@ -1,10 +1,10 @@
 ﻿using Azure.Identity;
 using Microsoft.Graph;
-using Microsoft.Graph.Models; 
+using Microsoft.Graph.Models;
 using Microsoft.Graph.Drives.Item.Items.Item.Invite;
 using Microsoft.Graph.Models.ODataErrors;
-using Recon.Core.Interfaces;
 using Microsoft.Extensions.Logging;
+using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Models;
 using Recon.Core.Options;
 using System.IO;
@@ -24,13 +24,15 @@ public class OneDrivePermissonService
     
     private Task _workingTask;
     private CancellationTokenSource _cts;
-    private readonly IDatabaseService _dbService;
+    private readonly IOneDriveRepository _oneDriveRepository;
+    private readonly IConfigRepository _configRepository;
     private readonly ILogger<OneDrivePermissonService> _logger;
 
-    // (Lazy initialization)
-    public OneDrivePermissonService(IDatabaseService dbService, ILogger<OneDrivePermissonService> logger)
+    public OneDrivePermissonService(IOneDriveRepository oneDriveRepository, IConfigRepository configRepository,
+        ILogger<OneDrivePermissonService> logger)
     {
-        _dbService = dbService;
+        _oneDriveRepository = oneDriveRepository;
+        _configRepository = configRepository;
         _logger = logger;
     }
 
@@ -114,9 +116,9 @@ private async Task WorkerLoop(CancellationToken token)
         try
         {
             // 1. Читаємо конфіг
-            var azureConfig = await _dbService.GetAzureConfigAsync();
-            var oneDrivePath = azureConfig.OneDrivePath;
-            var sourceRootPath = _dbService.GetRootFolder();
+            var azureConfig = await _configRepository.GetAzureConfigAsync();
+            var oneDrivePath = azureConfig!.OneDrivePath;
+            var sourceRootPath = await _configRepository.GetRootFolderAsync();
             
             // 2. Ініціалізація
             Initialize(azureConfig, oneDrivePath, sourceRootPath);
@@ -124,7 +126,7 @@ private async Task WorkerLoop(CancellationToken token)
             // ============================================
             // БЛОК 1: ВИДАЧА ПРАВ (GRANT)
             // ============================================
-            var usersToGrant = await _dbService.GetUsersForOneDriveUpdateAsync();
+            var usersToGrant = await _oneDriveRepository.GetUsersForOneDriveUpdateAsync();
             
             if (usersToGrant.Count > 0)
             {
@@ -156,7 +158,7 @@ private async Task WorkerLoop(CancellationToken token)
             // ============================================
             // БЛОК 2: ЗАБИРАННЯ ПРАВ (REVOKE)
             // ============================================
-            var usersToRevoke = await _dbService.GetUsersForOneDriveRemovalAsync();
+            var usersToRevoke = await _oneDriveRepository.GetUsersForOneDriveRemovalAsync();
             
             if (usersToRevoke.Count > 0)
             {
@@ -175,7 +177,7 @@ private async Task WorkerLoop(CancellationToken token)
                 
                 if (pathsToProcess.Count == 0)
                 {
-                    await _dbService.MarkOneDriveAccessRevokedAsync(user.UserId);
+                    await _oneDriveRepository.MarkOneDriveAccessRevokedAsync(user.UserId);
                 }
 
                 foreach (var cloudPath in pathsToProcess)
@@ -283,7 +285,7 @@ private async Task WorkerLoop(CancellationToken token)
             _logger.LogInformation($"[OneDriveService] Успішно видано доступ {userEmail} до {cloudPath}");
             
             // Помічаємо в базі, що права видано (щоб не слати запити вічно)
-            await _dbService.MarkOneDriveAccessGrantedAsync(userId);
+            await _oneDriveRepository.MarkOneDriveAccessGrantedAsync(userId);
         }
         catch (ODataError odataEx)
         {
@@ -322,7 +324,7 @@ private async Task WorkerLoop(CancellationToken token)
             {
                 _logger.LogWarning($"[Revoke] Файл не знайдено в хмарі: {cloudPath}. Вважаємо доступ скасованим.");
                 
-                await _dbService.MarkOneDriveAccessRevokedAsync(userId);
+                await _oneDriveRepository.MarkOneDriveAccessRevokedAsync(userId);
                 return; 
             }
     
@@ -367,7 +369,7 @@ private async Task WorkerLoop(CancellationToken token)
             }
     
             // 5. Оновлюємо статус у БД
-            await _dbService.MarkOneDriveAccessRevokedAsync(userId);
+            await _oneDriveRepository.MarkOneDriveAccessRevokedAsync(userId);
         }
         catch (Exception ex)
         {

@@ -1,6 +1,6 @@
-﻿using System.Reflection.PortableExecutable;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Recon.Core.Interfaces;
+using Recon.Core.Interfaces.Repositories;
 using System.IO;
 
 namespace Recon.Core.Services;
@@ -8,23 +8,21 @@ namespace Recon.Core.Services;
 public class OneDriveService : IOneDriveService
 {
     private readonly ILogger<OneDriveService> _logger;
-    private readonly string _rootPath;
-    private readonly int _months;
-    
+    private readonly IConfigRepository _configRepository;
+    private string? _rootPath;
+    private int _months;
+
     private CancellationTokenSource? _cts;
-    
-    public OneDriveService(ILogger<OneDriveService> logger, IConfigService configService, IDatabaseService databaseService)
+
+    public OneDriveService(ILogger<OneDriveService> logger, IConfigRepository configRepository)
     {
         _logger = logger;
-        
-        var config = databaseService.GetOneDriveConfig();
-        _rootPath = config.Path;
-        _months = config.Months;
+        _configRepository = configRepository;
     }
 
     public void CopyToOneDrive(string localSourcePath, string relativePath)
     {
-        if (string.IsNullOrEmpty(_rootPath) || string.IsNullOrEmpty(_rootPath)) return;
+        if (string.IsNullOrEmpty(_rootPath)) return;
 
         try
         {
@@ -43,10 +41,24 @@ public class OneDriveService : IOneDriveService
     
     public void StartCleanupScheduler()
     {
-        if (_cts != null) return; 
+        if (_cts != null) return;
         _cts = new CancellationTokenSource();
-        
-        Task.Run(() => CleanupLoop(_cts.Token));
+
+        var token = _cts.Token;
+        Task.Run(async () =>
+        {
+            try
+            {
+                var config = await _configRepository.GetOneDriveConfigAsync();
+                _rootPath = config.Path;
+                _months = config.Months;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Помилка завантаження конфігурації OneDrive");
+            }
+            await CleanupLoop(token);
+        });
     }
     
     public void StopCleanupScheduler()
