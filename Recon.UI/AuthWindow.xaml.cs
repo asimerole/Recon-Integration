@@ -1,5 +1,4 @@
-﻿using System.Windows;
-using System.Windows.Controls;
+using System.Windows;
 using System.IO;
 using Microsoft.Win32;
 using System.Security.Cryptography;
@@ -9,15 +8,12 @@ using MessageBox = System.Windows.Forms.MessageBox;
 
 namespace Recon.UI;
 
-/// <summary>
-/// Interaction logic for AuthWindow.xaml
-/// </summary>
 public partial class AuthWindow : Window
 {
     private readonly IAuthService _authService;
     private readonly IConfigService _configService;
     public bool IsAuthenticated { get; set; } = false;
-    
+
     public AuthWindow(IAuthService authService, IConfigService configService)
     {
         InitializeComponent();
@@ -29,23 +25,17 @@ public partial class AuthWindow : Window
         HiddenPasswordBox.Password = creds.Password;
         LoadConfigFiles();
     }
-    
+
     private void LoginButton_Click(object sender, RoutedEventArgs e)
     {
         var basePath = AppDomain.CurrentDomain.BaseDirectory;
         var path = basePath + ConfigComboBox.SelectedItem;
-        
+
         string login = LoginBox.Text;
-        string password;
-        if (ShowPasswordCheck.IsChecked == true)
-        {
-            password = VisiblePasswordBox.Text;
-        }
-        else
-        {
-            password = HiddenPasswordBox.Password;
-        }
-        
+        string password = HiddenPasswordBox.IsVisible
+            ? HiddenPasswordBox.Password
+            : VisiblePasswordBox.Text;
+
         if (!string.IsNullOrWhiteSpace(login) && !string.IsNullOrWhiteSpace(password))
         {
             var dbOptions = _configService.LoadDatabaseConfig(path);
@@ -54,10 +44,9 @@ public partial class AuthWindow : Window
 
             if (success)
             {
-                if (SaveParamsToRegistryCheck.IsChecked == true)
-                {
+                if (SaveParamsToRegistryToggle.IsChecked == true)
                     SaveParamsToRegistry(login, password);
-                }
+
                 IsAuthenticated = true;
                 DialogResult = true;
                 Close();
@@ -75,93 +64,83 @@ public partial class AuthWindow : Window
         {
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
             string[] configFiles = Directory.GetFiles(appDirectory, "*.conf");
-            
-            foreach (var filePath in configFiles)
-            {
-                string fileName = Path.GetFileName(filePath);
 
-                ConfigComboBox.Items.Add(fileName);
-            }
-            
+            foreach (var filePath in configFiles)
+                ConfigComboBox.Items.Add(Path.GetFileName(filePath));
+
             if (ConfigComboBox.Items.Count > 0)
-            {
                 ConfigComboBox.SelectedIndex = 0;
-            }
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Помилка при пошуку конфігів: {ex.Message}");
         }
     }
-    private void ShowPasswordCheck_OnClick(object sender, RoutedEventArgs e)
+
+    private void RevealPassword_Checked(object sender, RoutedEventArgs e)
     {
-        var checkBox = sender as CheckBox;
-        if (checkBox!.IsChecked == true)
-        {
-            VisiblePasswordBox.Text = HiddenPasswordBox.Password;
-            
-            HiddenPasswordBox.Visibility = Visibility.Collapsed;
-            VisiblePasswordBox.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            HiddenPasswordBox.Password = VisiblePasswordBox.Text;
-            
-            VisiblePasswordBox.Visibility = Visibility.Collapsed;
-            HiddenPasswordBox.Visibility = Visibility.Visible;
-            
-            HiddenPasswordBox.Focus();
-        }
+        VisiblePasswordBox.Text = HiddenPasswordBox.Password;
+        HiddenPasswordBox.Visibility = Visibility.Collapsed;
+        VisiblePasswordBox.Visibility = Visibility.Visible;
+    }
+
+    private void RevealPassword_Unchecked(object sender, RoutedEventArgs e)
+    {
+        HiddenPasswordBox.Password = VisiblePasswordBox.Text;
+        VisiblePasswordBox.Visibility = Visibility.Collapsed;
+        HiddenPasswordBox.Visibility = Visibility.Visible;
+    }
+
+    private void Border_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed)
+            DragMove();
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        DialogResult = false;
+        Close();
     }
 
     void SaveParamsToRegistry(string username, string password)
     {
-        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\ReconC#\Integration"))
+        using RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\ReconC#\Integration");
+        if (key != null)
         {
-            if (key != null)
+            key.SetValue("LastUsedLogin", username);
+
+            if (!string.IsNullOrEmpty(password))
             {
-                key.SetValue("LastUsedLogin", username);
-
-
-                if (!string.IsNullOrEmpty(password))
-                {
-                    byte[] data = Encoding.UTF8.GetBytes(password);
-                    
-                    byte[] encrypted = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
-                    
-                    key.SetValue("LastUsedPassword", Convert.ToBase64String(encrypted));
-                }
-                else
-                {
-                    key.DeleteValue("LastUsedPassword", throwOnMissingValue: false);
-                }
+                byte[] encrypted = ProtectedData.Protect(
+                    Encoding.UTF8.GetBytes(password), null, DataProtectionScope.CurrentUser);
+                key.SetValue("LastUsedPassword", Convert.ToBase64String(encrypted));
+            }
+            else
+            {
+                key.DeleteValue("LastUsedPassword", throwOnMissingValue: false);
             }
         }
     }
-    
+
     public (string Login, string Password) LoadParamsFromRegistry()
     {
-        string login = "";
-        string password = "";
-        
-        using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\ReconC#\Integration"))
-        {
-            if (key != null)
-            {
-                login = key.GetValue("LastUsedLogin")?.ToString() ?? "";
-                
-                string encryptedPass = key.GetValue("LastUsedPassword")?.ToString() ?? "";
-                
-                if (!string.IsNullOrEmpty(encryptedPass))
-                {
+        string login = "", password = "";
 
-                    byte[] encryptedBytes = Convert.FromBase64String(encryptedPass);
-                    byte[] decryptedBytes = ProtectedData.Unprotect(encryptedBytes, null, DataProtectionScope.CurrentUser);
-                    password = Encoding.UTF8.GetString(decryptedBytes);
-                }
+        using RegistryKey? key = Registry.CurrentUser.OpenSubKey(@"Software\ReconC#\Integration");
+        if (key != null)
+        {
+            login = key.GetValue("LastUsedLogin")?.ToString() ?? "";
+
+            string encryptedPass = key.GetValue("LastUsedPassword")?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(encryptedPass))
+            {
+                byte[] decrypted = ProtectedData.Unprotect(
+                    Convert.FromBase64String(encryptedPass), null, DataProtectionScope.CurrentUser);
+                password = Encoding.UTF8.GetString(decrypted);
             }
         }
-    
+
         return (login, password);
     }
 }
