@@ -29,7 +29,7 @@ public class OneDriveRepository : IOneDriveRepository
             WHERE u.isOneDriveActive = 1 AND u.onedrive_access_granted = 0 AND s.files_path IS NOT NULL";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             var rows = await conn.QueryAsync(sql);
             return rows.GroupBy(x => (int)x.UserId)
                 .Select(g => new UserAccessDto
@@ -61,7 +61,7 @@ public class OneDriveRepository : IOneDriveRepository
             WHERE u.isOneDriveActive = 0 AND u.onedrive_access_granted = 1 AND s.files_path IS NOT NULL";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             var rows = await conn.QueryAsync(sql);
             return rows.GroupBy(x => (int)x.UserId)
                 .Select(g => new UserAccessDto
@@ -83,7 +83,7 @@ public class OneDriveRepository : IOneDriveRepository
 
     public async Task MarkOneDriveAccessGrantedAsync(int userId)
     {
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         await conn.ExecuteAsync(
             "UPDATE users SET onedrive_access_granted = 1 WHERE id = @Id",
             new { Id = userId });
@@ -91,7 +91,7 @@ public class OneDriveRepository : IOneDriveRepository
 
     public async Task MarkOneDriveAccessRevokedAsync(int userId)
     {
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         await conn.ExecuteAsync(
             "UPDATE users SET onedrive_access_granted = 0 WHERE id = @Id",
             new { Id = userId });

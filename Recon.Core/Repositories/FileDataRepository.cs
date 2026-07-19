@@ -23,7 +23,7 @@ public class FileDataRepository : IFileDataRepository
     {
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             await conn.ExecuteAsync(
                 "[dbo].[sp_RebuildDatabase]",
                 commandType: CommandType.StoredProcedure,
@@ -40,8 +40,7 @@ public class FileDataRepository : IFileDataRepository
     public async Task<string?> GetTargetFolderByReconIdAsync(int reconId)
     {
         const string sql = "SELECT TOP 1 [files_path] FROM [struct] WHERE recon_id = @ReconId";
-        using var conn = _db.Create();
-        await conn.OpenAsync();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         using var cmd = new SqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("@ReconId", reconId);
         var result = await cmd.ExecuteScalarAsync();
@@ -58,7 +57,7 @@ public class FileDataRepository : IFileDataRepository
             JOIN struct s ON su.struct_id = s.id
             WHERE s.recon_id = @ReconId AND u.send_mail = 1 AND u.status = 1";
 
-        using var conn = _db.Create();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         var result = await conn.QueryAsync<string>(sql, new { ReconId = reconId });
         return result.ToList();
     }
@@ -102,7 +101,7 @@ public class FileDataRepository : IFileDataRepository
             COMMIT TRANSACTION;";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             await conn.ExecuteAsync(sql, new
             {
                 UnitName = unitName, SubstationName = substationName,
@@ -121,8 +120,7 @@ public class FileDataRepository : IFileDataRepository
 
         var dataTable = BuildImportTable(batch);
 
-        using var conn = _db.Create();
-        await conn.OpenAsync();
+        using var conn = await _db.BuildAndOpenConnectionAsync();
         using var tx = conn.BeginTransaction();
         try
         {

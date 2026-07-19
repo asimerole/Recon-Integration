@@ -1,4 +1,6 @@
+using System.Data;
 using Microsoft.Data.SqlClient;
+using Recon.Core.Dtos;
 
 namespace Recon.Core.Infrastructure;
 
@@ -8,13 +10,33 @@ public class SqlConnectionFactory : IDbConnectionFactory
 
     public bool IsInitialized => !string.IsNullOrEmpty(_connectionString);
 
-    public void SetConnectionString(string connectionString) =>
-        _connectionString = connectionString;
+    public void Initialize(DbConnectionParamsDto parameters)
+    {
+        string serverAddress = string.IsNullOrWhiteSpace(parameters.Port)
+            ? parameters.Server
+            : $"{parameters.Server},{parameters.Port}";
 
-    public SqlConnection Create()
+        _connectionString = new SqlConnectionStringBuilder
+        {
+            DataSource = serverAddress,
+            InitialCatalog = parameters.Database,
+            UserID = parameters.Username,
+            Password = parameters.Password,
+            TrustServerCertificate = true,
+            Encrypt = false,
+            MultiSubnetFailover = true,
+            ConnectTimeout = 15
+        }.ConnectionString;
+    }
+
+    public async Task<SqlConnection> BuildAndOpenConnectionAsync()
     {
         if (!IsInitialized)
             throw new InvalidOperationException("Підключення до БД не ініціалізовано. Спочатку виконайте вхід.");
-        return new SqlConnection(_connectionString);
+
+        var connection = new SqlConnection(_connectionString);
+        if (connection.State != ConnectionState.Open)
+            await connection.OpenAsync();
+        return connection;
     }
 }

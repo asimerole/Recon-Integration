@@ -26,7 +26,7 @@ public class UserRepository : IUserRepository
             WHERE login = @LoginParam";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             return await conn.QuerySingleOrDefaultAsync<User>(sql, new { LoginParam = username });
         }
         catch (Exception ex)
@@ -41,7 +41,7 @@ public class UserRepository : IUserRepository
         const string sql = "SELECT login FROM users WHERE status = @Status";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             var result = await conn.QueryAsync<string>(sql, new { Status = UserStatus.Active });
             return result.ToList();
         }
@@ -57,7 +57,7 @@ public class UserRepository : IUserRepository
         const string sql = "SELECT login FROM users";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             var result = await conn.QueryAsync<string>(sql);
             return result.ToList();
         }
@@ -80,7 +80,7 @@ public class UserRepository : IUserRepository
         var result = new Dictionary<string, List<string>>();
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             var rows = await conn.QueryAsync(sql);
             foreach (var row in rows)
             {

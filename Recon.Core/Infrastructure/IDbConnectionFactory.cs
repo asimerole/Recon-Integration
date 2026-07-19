@@ -1,10 +1,11 @@
 using Microsoft.Data.SqlClient;
+using Recon.Core.Dtos;
 
 namespace Recon.Core.Infrastructure;
 
 public interface IDbConnectionFactory
 {
-    SqlConnection Create();
-    void SetConnectionString(string connectionString);
+    Task<SqlConnection> BuildAndOpenConnectionAsync();
+    void Initialize(DbConnectionParamsDto parameters);
     bool IsInitialized { get; }
 }

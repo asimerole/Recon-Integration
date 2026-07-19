@@ -1,8 +1,8 @@
-﻿using Recon.Core.Options;
+using Recon.Core.Dtos;
 
 namespace Recon.Core.Interfaces;
 
 public interface IConfigService
 {
-    DatabaseOptions LoadDatabaseConfig(string configFilePath);
+    DbConnectionParamsDto LoadDatabaseConfig(string configFilePath);
 }

@@ -77,7 +77,7 @@
                 <!-- Config file -->
                 <ComboBox x:Name="ConfigComboBox"
                           Style="{StaticResource MaterialDesignOutlinedComboBox}"
-                          md:HintAssist.Hint="Файл конфігурації (.conf)"
+                          md:HintAssist.Hint="Файл конфігурації (.recon)"
                           md:TextFieldAssist.HasLeadingIcon="True"
                           md:TextFieldAssist.LeadingIcon="FileSettingsOutline"/>
 

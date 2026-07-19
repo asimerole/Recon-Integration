@@ -46,7 +46,7 @@ public class ServerRepository : IServerRepository
             WHERE fs.status = @ServerStatus AND d.isActiveDir = @DirStatus";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             var servers = (await conn.QueryAsync<ServerInfo>(sql, new
             {
                 ServerStatus = ServerStatus.Active,
@@ -87,7 +87,7 @@ public class ServerRepository : IServerRepository
                 VALUES (@StructId, @LastPing, @LastRecon, @LastDaily);";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             await conn.ExecuteAsync(sql, new { StructId = structId, LastPing = lastPing, LastRecon = lastRecon, LastDaily = lastDaily });
         }
         catch (Exception ex)
@@ -115,7 +115,7 @@ public class ServerRepository : IServerRepository
             VALUES (@Id, CAST(GETDATE() AS DATE), 1)";
         try
         {
-            using var conn = _db.Create();
+            using var conn = await _db.BuildAndOpenConnectionAsync();
             int rows = await conn.ExecuteAsync(updateSql, new { Id = serverId });
             if (rows == 0)
             {

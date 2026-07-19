@@ -3,6 +3,7 @@ using System.IO;
 using Microsoft.Win32;
 using System.Security.Cryptography;
 using System.Text;
+using Recon.Core.Dtos;
 using Recon.Core.Interfaces;
 using MessageBox = System.Windows.Forms.MessageBox;
 
@@ -23,6 +24,7 @@ public partial class AuthWindow : Window
         var creds = LoadParamsFromRegistry();
         LoginBox.Text = creds.Login;
         HiddenPasswordBox.Password = creds.Password;
+        SaveParamsToRegistryToggle.IsChecked = creds.IsSaveParams;
         LoadConfigFiles();
     }
 
@@ -39,13 +41,13 @@ public partial class AuthWindow : Window
         if (!string.IsNullOrWhiteSpace(login) && !string.IsNullOrWhiteSpace(password))
         {
             var dbOptions = _configService.LoadDatabaseConfig(path);
-            dbOptions.ConnectionString = "Data Source=piqtiedo\\SQLEXPRESS;Initial Catalog=ASR_RECONDB;User ID=admin;Password=admin;Connect Timeout=30;Encrypt=False;TrustServerCertificate=True;MultiSubnetFailover=True";
             bool success = await _authService.LoginAsync(login, password, dbOptions);
 
             if (success)
             {
-                if (SaveParamsToRegistryToggle.IsChecked == true)
-                    SaveParamsToRegistry(login, password);
+                var isSave = SaveParamsToRegistryToggle.IsChecked;
+                if (isSave == true)
+                    SaveParamsToRegistry(login, password, isSave);
 
                 IsAuthenticated = true;
                 DialogResult = true;
@@ -63,7 +65,7 @@ public partial class AuthWindow : Window
         try
         {
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            string[] configFiles = Directory.GetFiles(appDirectory, "*.conf");
+            string[] configFiles = Directory.GetFiles(appDirectory, "*.recon");
 
             foreach (var filePath in configFiles)
                 ConfigComboBox.Items.Add(Path.GetFileName(filePath));
@@ -103,13 +105,13 @@ public partial class AuthWindow : Window
         Close();
     }
 
-    void SaveParamsToRegistry(string username, string password)
+    void SaveParamsToRegistry(string username, string password, bool? isSave)
     {
         using RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\ReconC#\Integration");
         if (key != null)
         {
             key.SetValue("LastUsedLogin", username);
-
+            key.SetValue("IsSaveParams", isSave);
             if (!string.IsNullOrEmpty(password))
             {
                 byte[] encrypted = ProtectedData.Protect(
@@ -123,15 +125,16 @@ public partial class AuthWindow : Window
         }
     }
 
-    public (string Login, string Password) LoadParamsFromRegistry()
+    public (string Login, string Password, bool IsSaveParams) LoadParamsFromRegistry()
     {
         string login = "", password = "";
+        bool isSaveChecked = false;
 
         using RegistryKey? key = Registry.CurrentUser.OpenSubKey(@"Software\ReconC#\Integration");
         if (key != null)
         {
             login = key.GetValue("LastUsedLogin")?.ToString() ?? "";
-
+            isSaveChecked = key.GetValue("IsSaveParams")?.ToString() == "True";
             string encryptedPass = key.GetValue("LastUsedPassword")?.ToString() ?? "";
             if (!string.IsNullOrEmpty(encryptedPass))
             {
@@ -141,6 +144,6 @@ public partial class AuthWindow : Window
             }
         }
 
-        return (login, password);
+        return (login, password, isSaveChecked);
     }
 }

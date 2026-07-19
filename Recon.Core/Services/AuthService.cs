@@ -1,7 +1,7 @@
+using Recon.Core.Dtos;
 using Recon.Core.Infrastructure;
 using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
-using Recon.Core.Options;
 
 namespace Recon.Core.Services;
 
@@ -18,9 +18,9 @@ public class AuthService : IAuthService
         _crypto = crypto;
     }
 
-    public async Task<bool> LoginAsync(string username, string password, DatabaseOptions dbOptions)
+    public async Task<bool> LoginAsync(string username, string password, DbConnectionParamsDto dbOptions)
     {
-        _dbFactory.SetConnectionString(dbOptions.ConnectionString);
+        _dbFactory.Initialize(dbOptions);
 
         var user = await _userRepository.GetUserByLoginAsync(username);
         if (user == null) return false;
