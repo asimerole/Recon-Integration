@@ -17,6 +17,7 @@ public partial class App : Application
 {
     private IHost _host;
     private TaskbarIcon _notifyIcon;
+    private TrayMenuWindow? _trayMenuWindow;
 
     public App()
     {
@@ -97,11 +98,15 @@ public partial class App : Application
     {
         _notifyIcon = (TaskbarIcon)FindResource("MyTrayIcon");
         var vm = _host.Services.GetRequiredService<TrayViewModel>();
-        _notifyIcon.DataContext = vm;
+
+        _trayMenuWindow = new TrayMenuWindow { DataContext = vm };
+        _notifyIcon.TrayLeftMouseDown  += (_, _) => _trayMenuWindow.ShowAtTrayPosition();
+        _notifyIcon.TrayRightMouseDown += (_, _) => _trayMenuWindow.ShowAtTrayPosition();
     }
 
     protected override async void OnExit(ExitEventArgs e)
     {
+        _trayMenuWindow?.Close();
         _notifyIcon?.Dispose();
         await _host.StopAsync();
         _host.Dispose();

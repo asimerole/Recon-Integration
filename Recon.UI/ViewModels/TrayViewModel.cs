@@ -36,7 +36,8 @@ public partial class TrayViewModel : ObservableObject
     private bool _isSyncingWithDb;
 
     [ObservableProperty] private string _version;
-    [ObservableProperty] private string _progress;
+    [ObservableProperty] private string _progress = string.Empty;
+    [ObservableProperty] private int _integrationPercent;
     [ObservableProperty] private string _databaseInfo;
     [ObservableProperty] private bool _isFtpActive;
     [ObservableProperty] private bool _isIntegrationActive;
@@ -179,7 +180,11 @@ public partial class TrayViewModel : ObservableObject
     }
 
     private IProgress<int> CreateProgressReporter() =>
-        new Progress<int>(percent => Progress = $"Інтеграція: {percent}%");
+        new Progress<int>(percent =>
+        {
+            IntegrationPercent = percent;
+            Progress = percent > 0 && percent < 100 ? $"{percent}%" : string.Empty;
+        });
 
     private async Task LoadModuleStatesAsync()
     {

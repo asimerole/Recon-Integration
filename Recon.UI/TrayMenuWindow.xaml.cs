@@ -98,6 +98,23 @@ public partial class TrayMenuWindow : Window
         base.OnClosed(e);
     }
 
+    public void ShowAtTrayPosition()
+    {
+        var workArea = SystemParameters.WorkArea;
+        // Use cached size on subsequent calls; approximate on first
+        double w = ActualWidth > 0 ? ActualWidth : 276;
+        double h = ActualHeight > 0 ? ActualHeight : 400;
+        Left = workArea.Right - w - 16;
+        Top  = workArea.Bottom - h - 16;
+        Show();
+        // Reposition precisely after WPF measures the actual size
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            Left = workArea.Right - ActualWidth - 16;
+            Top  = workArea.Bottom - ActualHeight - 16;
+        }));
+    }
+
     private void RemoveHook()
     {
         if (_hook != IntPtr.Zero)

@@ -14,44 +14,7 @@
 
             <tb:TaskbarIcon x:Key="MyTrayIcon"
                             ToolTipText="Recon Integration"
-                            IconSource="/Assets/Icons/icon.ico">
-                <tb:TaskbarIcon.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="{Binding Version}" IsEnabled="False"/>
-                        <MenuItem Header="{Binding UptimeStr}" IsEnabled="False"/>
-                        <MenuItem Header="{Binding DatabaseInfo}" IsEnabled="False"/>
-                        <MenuItem Header="{Binding Progress, StringFormat='Інтеграція: {0}%'}"
-                                  IsEnabled="False"/>
-
-                        <MenuItem Header="Повідомити всіх"
-                                  Command="{Binding NotifyAllCommand}"/>
-
-                        <Separator/>
-
-                        <MenuItem Header="OneDrive - ввимк/вимк"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsOneDriveActive, Mode=TwoWay}"/>
-
-                        <MenuItem Header="Поштова розсилка - ввимк/вимк"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsMailActive, Mode=TwoWay}"/>
-
-                        <MenuItem Header="Сбір - ввимк/вимк"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsFtpActive, Mode=TwoWay}"/>
-
-                        <MenuItem Header="Інтеграція в БД - ввимк/вимк"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsIntegrationActive, Mode=TwoWay}"/>
-
-                        <MenuItem Header="Повторна збірка"
-                                  Command="{Binding RebuildDatabaseCommand}"/>
-
-                        <MenuItem Header="Вихід"
-                                  Command="{Binding ExitAppCommand}"/>
-                    </ContextMenu>
-                </tb:TaskbarIcon.ContextMenu>
-            </tb:TaskbarIcon>
+                            IconSource="/Assets/Icons/icon.ico"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
