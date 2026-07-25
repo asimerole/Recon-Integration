@@ -3,8 +3,9 @@ using System.IO;
 using Microsoft.Win32;
 using System.Security.Cryptography;
 using System.Text;
-using Recon.Core.Dtos;
+using System.Windows.Input;
 using Recon.Core.Interfaces;
+using System.Windows.Forms;
 using MessageBox = System.Windows.Forms.MessageBox;
 
 namespace Recon.UI;
@@ -53,6 +54,11 @@ public partial class AuthWindow : Window
                 DialogResult = true;
                 Close();
             }
+            else
+            {
+                MessageBox.Show("Невірний логін або пароль.", "Помилка входу",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
         else
         {
@@ -93,9 +99,9 @@ public partial class AuthWindow : Window
         HiddenPasswordBox.Visibility = Visibility.Visible;
     }
 
-    private void Border_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void Border_MouseLeftButtonDown(object sender,MouseButtonEventArgs e)
     {
-        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed)
+        if (e.ButtonState == MouseButtonState.Pressed)
             DragMove();
     }
 

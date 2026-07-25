@@ -8,7 +8,6 @@ public interface IConfigRepository
     Task SaveModuleConfigAsync(ModuleConfig config);
     Task<MailServerConfig> GetMailServerConfigAsync();
     Task<OneDriveConfig> GetOneDriveConfigAsync();
-    Task<AzureConfig?> GetAzureConfigAsync();
     Task<string> GetRootFolderAsync();
     Task<string> GetWinrecPathAsync();
     Task<int> GetFeedingTimeAsync();

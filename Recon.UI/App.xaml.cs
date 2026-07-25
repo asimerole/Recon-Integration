@@ -9,7 +9,6 @@ using Recon.Core.Repositories;
 using Recon.Core.Services;
 using Recon.UI.ViewModels;
 using Serilog;
-using Serilog.Filters;
 using Microsoft.Data.SqlClient;
 
 namespace Recon.UI;
@@ -23,18 +22,6 @@ public partial class App : Application
     {
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
-            .WriteTo.Logger(l => l
-                .Filter.ByIncludingOnly(Matching.FromSource<FtpService>())
-                .WriteTo.File("logs/ftp-.log", rollingInterval: RollingInterval.Day))
-            .WriteTo.Logger(l => l
-                .Filter.ByIncludingOnly(Matching.FromSource<MailService>())
-                .WriteTo.File("logs/mail-.log", rollingInterval: RollingInterval.Day))
-            .WriteTo.Logger(l => l
-                .Filter.ByIncludingOnly(Matching.FromSource<IntegrationService>())
-                .WriteTo.File("logs/integration-.log", rollingInterval: RollingInterval.Day))
-            .WriteTo.Logger(l => l
-                .Filter.ByIncludingOnly(Matching.FromSource<OneDriveService>())
-                .WriteTo.File("logs/onedrive-.log", rollingInterval: RollingInterval.Day))
             .WriteTo.File("logs/general-.log", rollingInterval: RollingInterval.Day)
             .CreateLogger();
 
@@ -52,7 +39,7 @@ public partial class App : Application
                 services.AddSingleton<IConfigRepository, ConfigRepository>();
                 services.AddSingleton<IFileDataRepository, FileDataRepository>();
                 services.AddSingleton<IServerRepository, ServerRepository>();
-                services.AddSingleton<IOneDriveRepository, OneDriveRepository>();
+                services.AddSingleton<IAppLogRepository, AppLogRepository>();
 
                 // Services
                 services.AddSingleton<IAuthService, AuthService>();
@@ -64,7 +51,6 @@ public partial class App : Application
                 services.AddSingleton<IConfigService, ConfigService>();
                 services.AddSingleton<ConfigMonitorService>();
                 services.AddSingleton<IStatisticsService, StatisticsService>();
-                services.AddSingleton<OneDrivePermissonService>();
                 services.AddSingleton<BrokenFileService>();
 
                 // UI

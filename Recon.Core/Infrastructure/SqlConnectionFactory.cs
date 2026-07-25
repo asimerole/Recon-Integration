@@ -9,12 +9,17 @@ public class SqlConnectionFactory : IDbConnectionFactory
     private string? _connectionString;
 
     public bool IsInitialized => !string.IsNullOrEmpty(_connectionString);
+    public string ServerName { get; private set; } = "";
+    public string DatabaseName { get; private set; } = "";
 
     public void Initialize(DbConnectionParamsDto parameters)
     {
         string serverAddress = string.IsNullOrWhiteSpace(parameters.Port)
             ? parameters.Server
             : $"{parameters.Server},{parameters.Port}";
+
+        ServerName = serverAddress;
+        DatabaseName = parameters.Database;
 
         _connectionString = new SqlConnectionStringBuilder
         {

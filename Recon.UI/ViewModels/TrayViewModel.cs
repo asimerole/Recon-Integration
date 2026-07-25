@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Recon.Core.Infrastructure;
 using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Options;
@@ -27,7 +28,7 @@ public partial class TrayViewModel : ObservableObject
     private readonly IUserRepository _userRepository;
     private readonly IFileDataRepository _fileDataRepository;
     private readonly IStatisticsService _stats;
-    private readonly OneDrivePermissonService _oneDrivePermissionService;
+    private readonly IDbConnectionFactory _dbFactory;
 
     private bool _dbIsFull;
     private bool _fastDatabaseBuild;
@@ -36,6 +37,7 @@ public partial class TrayViewModel : ObservableObject
 
     [ObservableProperty] private string _version;
     [ObservableProperty] private string _progress;
+    [ObservableProperty] private string _databaseInfo;
     [ObservableProperty] private bool _isFtpActive;
     [ObservableProperty] private bool _isIntegrationActive;
     [ObservableProperty] private bool _isMailActive;
@@ -50,7 +52,7 @@ public partial class TrayViewModel : ObservableObject
         IFileDataRepository fileDataRepository,
         ConfigMonitorService configMonitor,
         IStatisticsService stats,
-        OneDrivePermissonService oneDrivePermissonService)
+        IDbConnectionFactory dbFactory)
     {
         _ftpService = ftpService;
         _mailService = mailService;
@@ -59,8 +61,9 @@ public partial class TrayViewModel : ObservableObject
         _configRepository = configRepository;
         _userRepository = userRepository;
         _fileDataRepository = fileDataRepository;
-        _oneDrivePermissionService = oneDrivePermissonService;
         _stats = stats;
+        _dbFactory = dbFactory;
+        DatabaseInfo = $"{_dbFactory.DatabaseName} @ {_dbFactory.ServerName}";
 
         _configMonitor = configMonitor;
         _configMonitor.OnConfigChanged += OnRemoteConfigReceived;
@@ -170,10 +173,9 @@ public partial class TrayViewModel : ObservableObject
         progressReporter.Report(0);
         if (IsIntegrationActive) _integrationService.StartIntegration(progressReporter);
         if (IsFtpActive) _ftpService.StartFTP();
+        if (IsMailActive) _mailService.StartSendingLoop();
 
         _oneDriveService.StartCleanupScheduler();
-        _mailService.StartSendingLoop();
-        _oneDrivePermissionService.StartMonitoring();
     }
 
     private IProgress<int> CreateProgressReporter() =>
@@ -251,6 +253,8 @@ public partial class TrayViewModel : ObservableObject
     {
         if (_isSyncingWithDb || _isInitializing) return;
         _ = Task.Run(SaveCurrentStateAsync);
+        if (value) _mailService.StartSendingLoop();
+        else _mailService.StopSendingLoop();
     }
 
     partial void OnIsOneDriveActiveChanged(bool value)

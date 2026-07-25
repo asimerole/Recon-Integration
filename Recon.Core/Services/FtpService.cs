@@ -2,7 +2,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
+using Recon.Core.Constants;
 using Recon.Core.Enums;
 using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
@@ -16,9 +16,11 @@ public class FtpService : IFtpService
 {
     private readonly IConfigRepository _configRepository;
     private readonly IServerRepository _serverRepository;
-    private readonly ILogger<FtpService> _logger;
+    private readonly IAppLogRepository _appLog;
     private readonly IOneDriveService _oneDriveService;
     private readonly IStatisticsService _statsService;
+    private readonly IMailService _mailService;
+    private readonly IUserRepository _userRepository;
 
     private string _ftpCacheDir;
     private OneDriveConfig _oneDriveConfig;
@@ -28,22 +30,26 @@ public class FtpService : IFtpService
     private Task? _workingTask;
 
     public FtpService(IConfigRepository configRepository, IServerRepository serverRepository,
-        ILogger<FtpService> logger, IOneDriveService oneDriveService, IStatisticsService statsService)
+        IAppLogRepository appLog, IOneDriveService oneDriveService, IStatisticsService statsService,
+        IMailService mailService, IUserRepository userRepository)
     {
         _configRepository = configRepository;
         _serverRepository = serverRepository;
-        _logger = logger;
+        _appLog = appLog;
         _oneDriveService = oneDriveService;
         _statsService = statsService;
+        _mailService = mailService;
+        _userRepository = userRepository;
     }
     
     public void StartFTP()
     {
-        if (_workingTask != null && !_workingTask.IsCompleted) return; 
-        
+        if (_workingTask != null && !_workingTask.IsCompleted) return;
+
         _cts = new CancellationTokenSource();
-        
         _workingTask = Task.Run(() => WorkerLoop(_cts.Token));
+
+        _ = _appLog.LogAsync(LogServiceId.Ftp, "ftp_start");
     }
 
     public void StopFTP()
@@ -62,6 +68,11 @@ public class FtpService : IFtpService
             while (!token.IsCancellationRequested)
             {
                 var rootFolder = await _configRepository.GetRootFolderAsync();
+                var config = await _configRepository.GetModuleConfigAsync();
+                if (!config.IsFtpActive) break;
+
+                _isOneDriveActive = config.IsOneDriveActive;
+                _oneDriveConfig = await _configRepository.GetOneDriveConfigAsync();
 
                 List<ServerInfo> servers = await _serverRepository.GetAllServersAsync();
 
@@ -72,12 +83,6 @@ public class FtpService : IFtpService
                 foreach (var server in servers)
                 {
                     if (token.IsCancellationRequested) break;
-
-                    var config = await _configRepository.GetModuleConfigAsync();
-                    if (!config.IsFtpActive) break;
-
-                    _isOneDriveActive = config.IsOneDriveActive;
-                    _oneDriveConfig = await _configRepository.GetOneDriveConfigAsync();
 
                     CreateLocalDirectoryTree(server, rootFolder);
                     if (_isOneDriveActive) CreateLocalDirectoryTree(server, _oneDriveConfig.Path);
@@ -90,11 +95,11 @@ public class FtpService : IFtpService
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("FTP Service остановлен пользователем.");
+            await _appLog.LogAsync(LogServiceId.Ftp, "ftp_stop");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Критическая ошибка в цикле FTP");
+            await _appLog.LogAsync(LogServiceId.Ftp, "loop_error", ex.Message);
             await Task.Delay(5000);
         }
     }
@@ -142,8 +147,7 @@ public class FtpService : IFtpService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "FTP Critical Error: Failed to create directory tree for {Unit}/{Substation}",
-                server.Unit, server.Substation);
+            _ = _appLog.LogAsync(LogServiceId.Ftp, "file_error", $"Не вдалося створити директорію {server.Unit}/{server.Substation}: {ex.Message}");
             return false;
         }
     }
@@ -158,10 +162,11 @@ public class FtpService : IFtpService
             
                 await client.Connect();
                 server.LastPingTime = DateTime.Now;
+                await _serverRepository.UpdateServerStatusAsync(server.StructId, lastPing: server.LastPingTime);
+
                 var items = await client.GetListing(server.RemoteFolderPath);
                 if (items.Length == 0) return;
 
-                //_logger.LogInformation("Знайдено {Count} файлів на {Ip}", items.Length, server.IpAddress);
                 
                 foreach (var item in items)
                 {
@@ -177,7 +182,7 @@ public class FtpService : IFtpService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Критична помилка FTP на сервері {Ip}", server.IpAddress);
+            await _appLog.LogAsync(LogServiceId.Ftp, "server_error", $"{server.IpAddress}: {ex.Message}");
         }
     }
     
@@ -198,6 +203,7 @@ public class FtpService : IFtpService
         client.Encoding = Encoding.UTF8;
         client.Config.ValidateAnyCertificate = true;
         client.Config.DataConnectionType = FtpDataConnectionType.AutoPassive;
+        client.Config.TimeConversion = FtpDate.LocalTime;
     }
     
     private async Task ProcessSingleFileAsync(AsyncFtpClient client, FtpListItem item, ServerInfo server)
@@ -213,7 +219,7 @@ public class FtpService : IFtpService
             
             if (status == FtpStatus.Success)
             {
-                await _serverRepository.UpdateDailyStatAsync(server.Id, "collected");
+                await _serverRepository.UpdateDailyStatAsync(server.StructId, "collected");
                 
                 await HandleDownloadedFileAsync(tempLocalPath, item, server);
                 await client.DeleteFile(item.FullName);
@@ -248,25 +254,25 @@ public class FtpService : IFtpService
                         var relativePath = GetServerDirTree(server);
                         relativePath = Path.Combine(relativePath, item.Name);
                         _oneDriveService.CopyToOneDrive(tempLocalPath, relativePath);
-                        await _serverRepository.UpdateDailyStatAsync(server.Id, "uploaded");
+                        await _serverRepository.UpdateDailyStatAsync(server.StructId, "uploaded");
                         _statsService.RegisterAction(ServiceType.OneDrive, 1);
                     }
                     catch (IOException ioEx)
                     {
-                        _logger.LogWarning("OneDrive зайнятий, не вдалося оновити файл: {Msg}", ioEx.Message);
+                        await _appLog.LogAsync(LogServiceId.Ftp, "onedrive_error", $"Файл зайнятий: {ioEx.Message}");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError("OneDrive Error: {Msg}", ex.Message);
+                        await _appLog.LogAsync(LogServiceId.Ftp, "onedrive_error", ex.Message);
                     }
                 }
 
                 try
                 {
                     if (File.Exists(finalLocalPath)) File.Delete(finalLocalPath);
-            
+
                     File.Move(tempLocalPath, finalLocalPath);
-                    
+
                     if (item.Modified > DateTime.MinValue)
                     {
                         File.SetLastWriteTime(finalLocalPath, item.Modified);
@@ -274,45 +280,56 @@ public class FtpService : IFtpService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("Не удалось переименовать временный файл: {Msg}", ex.Message);
+                    await _appLog.LogAsync(LogServiceId.Ftp, "file_error", $"Перейменування {item.Name}: {ex.Message}");
                 }
-                
-                if (server.CollectedTimestamps == null) server.CollectedTimestamps = new List<DateTime>();
+
+                if (isDaily)
+                {
+                    await SendDailyFileAsync(server, finalLocalPath);
+                }
+
                 server.CollectedTimestamps.Add(DateTime.Now);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError("Помилка файлу {Name}: {Msg}", item.Name, ex.Message);
-            await client.Disconnect(); 
+            await _appLog.LogAsync(LogServiceId.Ftp, "file_error", $"{item.Name}: {ex.Message}");
+            await client.Disconnect();
         }
     }
     
+    private async Task SendDailyFileAsync(ServerInfo server, string filePath)
+    {
+        try
+        {
+            bool shouldSend = await _serverRepository.TryMarkDailySentAsync(server.StructId);
+            if (!shouldSend) return;
+
+            var recipients = await _userRepository.GetAllUserEmailsAsync();
+            if (!recipients.Any()) return;
+
+            string subject = $"Суточний файл: {server.Substation} - {server.Object} | {DateTime.Today:dd.MM.yyyy}";
+            string body = $"Прийшов суточний файл.\n\nОб'єкт: {server.Substation} / {server.Object}\n\nЦе повідомлення сформовано автоматично.";
+
+            _ = _mailService.SendToAllAsync(recipients, subject, body, new[] { filePath });
+        }
+        catch (Exception ex)
+        {
+            await _appLog.LogAsync(LogServiceId.Ftp, "file_error", $"Відправка суточного файлу {server.Object}: {ex.Message}");
+        }
+    }
+
     private async Task HandleDownloadedFileAsync(string localPath, FtpListItem item, ServerInfo server)
     {
-        if (item.Modified > DateTime.MinValue)
-        {
-            try 
-            {
-                File.SetLastWriteTime(localPath, item.Modified);
-            } 
-            catch (Exception ex) 
-            {
-                _logger.LogWarning("Дата файлу не змінена: {Msg}", ex.Message);
-            }
-        }
-        
         if (item.Name.StartsWith("DAILY") && item.Modified > server.LastDailyFileDate)
-        {
             server.LastDailyFileDate = item.Modified;
-        }
-        
-        await CreateMetaFileAsync(item.Name, server.LocalFolderPath, server.Id);
+
+        await CreateMetaFileAsync(item.Name, server.LocalFolderPath, server.StructId);
     }
     
-    private async Task CreateMetaFileAsync(string fileName, string target, int serverIdValue)
+    private async Task CreateMetaFileAsync(string fileName, string target, int structId)
     {
-        var metaData = new { targetPath = target, serverId = serverIdValue };
+        var metaData = new { targetPath = target, structId };
         var jsonOptions = new JsonSerializerOptions 
         { 
             WriteIndented = true, 
@@ -328,7 +345,7 @@ public class FtpService : IFtpService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Мета-файл не створено: {Msg}", ex.Message);
+            await _appLog.LogAsync(LogServiceId.Ftp, "file_error", $"Мета-файл {fileName}: {ex.Message}");
         }
     }
 

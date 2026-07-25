@@ -19,6 +19,7 @@
                     <ContextMenu>
                         <MenuItem Header="{Binding Version}" IsEnabled="False"/>
                         <MenuItem Header="{Binding UptimeStr}" IsEnabled="False"/>
+                        <MenuItem Header="{Binding DatabaseInfo}" IsEnabled="False"/>
                         <MenuItem Header="{Binding Progress, StringFormat='Інтеграція: {0}%'}"
                                   IsEnabled="False"/>
 

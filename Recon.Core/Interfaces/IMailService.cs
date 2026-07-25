@@ -15,4 +15,5 @@ public interface IMailService
     void AddToQueue(FilePair pair);
 
     void StartSendingLoop();
+    void StopSendingLoop();
 }

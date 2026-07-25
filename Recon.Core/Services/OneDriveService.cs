@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Recon.Core.Constants;
 using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
 using System.IO;
@@ -7,16 +7,16 @@ namespace Recon.Core.Services;
 
 public class OneDriveService : IOneDriveService
 {
-    private readonly ILogger<OneDriveService> _logger;
+    private readonly IAppLogRepository _appLog;
     private readonly IConfigRepository _configRepository;
     private string? _rootPath;
-    private int _months;
+    private int _days;
 
     private CancellationTokenSource? _cts;
 
-    public OneDriveService(ILogger<OneDriveService> logger, IConfigRepository configRepository)
+    public OneDriveService(IAppLogRepository appLog, IConfigRepository configRepository)
     {
-        _logger = logger;
+        _appLog = appLog;
         _configRepository = configRepository;
     }
 
@@ -27,18 +27,18 @@ public class OneDriveService : IOneDriveService
         try
         {
             string destPath = Path.Combine(_rootPath, relativePath);
-            string destDir = Path.GetDirectoryName(destPath);
+            string destDir = Path.GetDirectoryName(destPath)!;
 
             if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
-            
+
             File.Copy(localSourcePath, destPath, true);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Помилка копіювання в OneDrive: {Path}", relativePath);        
+            _ = _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Копіювання {relativePath}: {ex.Message}");
         }
     }
-    
+
     public void StartCleanupScheduler()
     {
         if (_cts != null) return;
@@ -51,93 +51,93 @@ public class OneDriveService : IOneDriveService
             {
                 var config = await _configRepository.GetOneDriveConfigAsync();
                 _rootPath = config.Path;
-                _months = config.Months;
+                _days = config.Days;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Помилка завантаження конфігурації OneDrive");
+                await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Завантаження конфігурації: {ex.Message}");
             }
             await CleanupLoop(token);
         });
     }
-    
+
     public void StopCleanupScheduler()
     {
         _cts?.Cancel();
         _cts = null;
     }
-    
+
     private async Task CleanupLoop(CancellationToken token)
     {
         try
         {
             while (!token.IsCancellationRequested)
             {
-                TimeSpan delay = CalculateDelayToNextRun(0, 10); // Час: 0, Минуты: 10
-
-                /*_logger.LogInformation("Наступна очистка запланована через {Time} (о {Date})", 
-                    delay, DateTime.Now.Add(delay));*/
-                
+                TimeSpan delay = CalculateDelayToNextRun(0, 10);
                 await Task.Delay(delay, token);
-                
-                CleanUpOldFiles(_months);
+                CleanUpOldFiles(_days);
             }
         }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("Планувальник очистки зупинено.");
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Критична помилка в планувальнику OneDrive");
+            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Планувальник: {ex.Message}");
             await Task.Delay(TimeSpan.FromMinutes(5), CancellationToken.None);
         }
     }
-    
+
     private TimeSpan CalculateDelayToNextRun(int targetHour, int targetMinute)
     {
         DateTime now = DateTime.Now;
-        // Берем сегодняшнюю дату и ставим нужное время
         DateTime nextRun = now.Date.AddHours(targetHour).AddMinutes(targetMinute);
-
-        // Если это время сегодня уже прошло, переносим на завтра
-        if (now >= nextRun)
-        {
-            nextRun = nextRun.AddDays(1);
-        }
-
+        if (now >= nextRun) nextRun = nextRun.AddDays(1);
         return nextRun - now;
     }
 
-    private void CleanUpOldFiles(int monthsToKeep)
+    private void CleanUpOldFiles(int daysToKeep)
     {
         if (string.IsNullOrEmpty(_rootPath) || !Directory.Exists(_rootPath)) return;
-        //_logger.LogInformation("Починаю очистку старих файлів OneDrive (старше {M} міс)...", monthsToKeep);
-        DateTime cutoffDate = DateTime.Now.AddMonths(-monthsToKeep);
+
+        DateTime cutoffDate = DateTime.Now.AddDays(-daysToKeep);
         try
         {
             var files = Directory.GetFiles(_rootPath, "*.*", SearchOption.AllDirectories);
-
             foreach (var file in files)
             {
                 var fileInfo = new FileInfo(file);
-                
                 if (fileInfo.LastWriteTime < cutoffDate)
                 {
                     try
                     {
+                        fileInfo.Attributes = FileAttributes.Normal;
                         fileInfo.Delete();
                     }
                     catch (Exception delEx)
                     {
-                        _logger.LogWarning("Не вдалося видалити старий файл {File}: {Msg}", fileInfo.Name, delEx.Message);
+                        _ = _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Видалення {fileInfo.Name}: {delEx.Message}");
                     }
                 }
             }
+
+            DeleteEmptyDirectories(_rootPath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Помилка при очистці OneDrive");
+            _ = _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Очистка: {ex.Message}");
+        }
+    }
+
+    private void DeleteEmptyDirectories(string root)
+    {
+        foreach (var dir in Directory.GetDirectories(root, "*", SearchOption.AllDirectories)
+                     .OrderByDescending(d => d.Length))
+        {
+            try
+            {
+                if (Directory.GetFiles(dir).Length == 0 && Directory.GetDirectories(dir).Length == 0)
+                    Directory.Delete(dir);
+            }
+            catch { }
         }
     }
 }

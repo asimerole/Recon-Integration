@@ -48,23 +48,6 @@ public class ConfigRepository : IConfigRepository
     public Task<OneDriveConfig> GetOneDriveConfigAsync() =>
         GetSettingAsync<OneDriveConfig>("onedrive", new OneDriveConfig());
 
-    public async Task<AzureConfig?> GetAzureConfigAsync()
-    {
-        const string sql = "SELECT [value] FROM [access_settings] WHERE [name] = @Name";
-        try
-        {
-            using var conn = await _db.BuildAndOpenConnectionAsync();
-            string? json = await conn.QueryFirstOrDefaultAsync<string>(sql, new { Name = "onedrive" });
-            if (string.IsNullOrEmpty(json)) return null;
-            return JsonSerializer.Deserialize<AzureConfig>(json, JsonOptions);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Помилка отримання Azure конфігурації");
-            throw;
-        }
-    }
-
     public async Task<string> GetRootFolderAsync() =>
         await GetSettingAsync<string>("root_directory", string.Empty) ?? string.Empty;
 
@@ -76,11 +59,14 @@ public class ConfigRepository : IConfigRepository
 
     private async Task<T?> GetSettingAsync<T>(string settingName, T? defaultValue = default)
     {
-        const string sql = "SELECT value FROM access_settings WHERE name = @Name";
         try
         {
             using var conn = await _db.BuildAndOpenConnectionAsync();
-            string? raw = await conn.QuerySingleOrDefaultAsync<string>(sql, new { Name = settingName });
+            var row = await conn.QuerySingleOrDefaultAsync(
+                "sp_GetAccessSettingByName",
+                new { Name = settingName },
+                commandType: System.Data.CommandType.StoredProcedure);
+            string? raw = row?.value;
 
             if (string.IsNullOrEmpty(raw))
             {

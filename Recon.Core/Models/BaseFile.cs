@@ -15,7 +15,7 @@ public abstract class BaseFile
     public string Unit { get; set; } = string.Empty;
     public string Substation { get; set; } = string.Empty;
     public string Object { get; set; } = string.Empty;
-    public int ServerId { get; set; }
+    public int StructId { get; set; }
     
     public DateTime Timestamp { get; set; }
     

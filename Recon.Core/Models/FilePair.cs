@@ -11,6 +11,6 @@ public class FilePair
     
     public string Object => Data?.Object ?? Express?.Object  ?? Other?.Object ?? "";
     public string Substation => Data?.Substation ?? Express?.Substation  ?? Other?.Substation ?? "";
-    public int ServerId => Data?.ServerId ?? Express?.ServerId ?? Other?.ServerId ?? 0;
+    public int StructId => Data?.StructId ?? Express?.StructId ?? Other?.StructId ?? 0;
     public DateTime Timestamp => Express?.Timestamp ?? Data?.Timestamp ?? Other?.Timestamp ?? DateTime.MinValue;
 }

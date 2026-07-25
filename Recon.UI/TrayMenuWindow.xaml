@@ -105,6 +105,9 @@
                 <TextBlock Text="{Binding UptimeStr}"
                            Foreground="#554E6E" FontFamily="Segoe UI" FontSize="11"
                            TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding DatabaseInfo}"
+                           Foreground="#554E6E" FontFamily="Segoe UI" FontSize="11"
+                           TextTrimming="CharacterEllipsis"/>
                 <TextBlock Text="{Binding Progress}"
                            Foreground="#554E6E" FontFamily="Segoe UI" FontSize="11">
                     <TextBlock.Style>

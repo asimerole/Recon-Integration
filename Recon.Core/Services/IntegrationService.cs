@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
+using Recon.Core.Constants;
 using Recon.Core.Enums;
 using Recon.Core.Factories;
 using Recon.Core.Interfaces;
@@ -15,7 +15,7 @@ public class IntegrationService : IIntegrationService
     private readonly IFileDataRepository _fileDataRepository;
     private readonly IConfigRepository _configRepository;
     private readonly IServerRepository _serverRepository;
-    private readonly ILogger<IIntegrationService> _logger;
+    private readonly IAppLogRepository _appLog;
     private readonly BrokenFileService _brokenFileService;
     private readonly IStatisticsService _statsService;
     private readonly IMailService _mailService;
@@ -35,25 +35,26 @@ public class IntegrationService : IIntegrationService
     private Task? _workingTask;
 
     public IntegrationService(IFileDataRepository fileDataRepository, IConfigRepository configRepository,
-        IServerRepository serverRepository, ILogger<IIntegrationService> logger,
+        IServerRepository serverRepository, IAppLogRepository appLog,
         BrokenFileService brokenFileService, IStatisticsService statisticsService, IMailService mailService)
     {
         _fileDataRepository = fileDataRepository;
         _configRepository = configRepository;
         _serverRepository = serverRepository;
+        _appLog = appLog;
         _brokenFileService = brokenFileService;
         _statsService = statisticsService;
         _mailService = mailService;
-        _logger = logger;
     }
     
     public void StartIntegration(IProgress<int> progress = null)
     {
-        if (_workingTask is { IsCompleted: false }) return; 
-        
+        if (_workingTask is { IsCompleted: false }) return;
+
         _cts = new CancellationTokenSource();
-        
         _workingTask = Task.Run(() => WorkerLoop(_cts.Token, progress));
+
+        _ = _appLog.LogAsync(LogServiceId.Integration, "integration_start");
     }
 
     public async Task StopIntegration()
@@ -130,7 +131,7 @@ public class IntegrationService : IIntegrationService
                 }
                 else
                 {
-                    progress.Report(100);
+                    progress?.Report(100);
                     // --- Only cache folder scan (new files from ftp servers) ---
                     string cachePath = Path.Combine(rootFolder, "Cache");
                     if (Directory.Exists(cachePath))
@@ -142,12 +143,13 @@ public class IntegrationService : IIntegrationService
             }
             catch (OperationCanceledException)
             {
+                await _appLog.LogAsync(LogServiceId.Integration, "integration_stop");
                 break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Критична помилка в циклі інтеграції");
-                await Task.Delay(5000, token);            
+                await _appLog.LogAsync(LogServiceId.Integration, "loop_error", ex.Message);
+                await Task.Delay(5000, token);
             }
         }
     }
@@ -169,51 +171,40 @@ public class IntegrationService : IIntegrationService
             
             string metaPath = filePath + ".meta";
             string targetFolder = null;
-            int serverId = 0;
+            int structId = 0;
             if (File.Exists(metaPath))
             {
-                try 
+                try
                 {
                     using (JsonDocument doc = JsonDocument.Parse(await File.ReadAllTextAsync(metaPath)))
-                    { 
-                        // 1. Get the path (this is a string)
+                    {
                         if (doc.RootElement.TryGetProperty("targetPath", out JsonElement pathEl))
-                        {
                             targetFolder = pathEl.GetString();
-                        }
 
-                        // 2. Get the server ID (this is a number) - FROM A SEPARATE PROPERTY
-                        // Check what the field is called in JSON: “serverId”, “id,” or “ServerId”?
-                        if (doc.RootElement.TryGetProperty("serverId", out JsonElement idEl)) 
+                        if (doc.RootElement.TryGetProperty("structId", out JsonElement idEl))
                         {
-                            // We use secure parsing, which I wrote about earlier.
                             if (idEl.ValueKind == JsonValueKind.Number)
-                            {
-                                serverId = idEl.GetInt32();
-                            }
+                                structId = idEl.GetInt32();
                             else if (idEl.ValueKind == JsonValueKind.String && int.TryParse(idEl.GetString(), out int val))
-                            {
-                                serverId = val;
-                            }
+                                structId = val;
                         }
                     }
                     if (!string.IsNullOrWhiteSpace(targetFolder)) File.Delete(metaPath);
                 }
-                catch (JsonException exception) 
+                catch (JsonException exception)
                 {
-                    _logger.LogError($"Битий JSON у файлі {metaPath}: {exception.Message}");
-                    File.Delete(metaPath); // Видаляємо, щоб не застрягати вічно
-                }  
-            } 
+                    await _appLog.LogAsync(LogServiceId.Integration, "file_error", $"Битий JSON: {metaPath}: {exception.Message}");
+                    File.Delete(metaPath);
+                }
+            }
             
             var fileObj = BaseFileFactory.Create(filePath);
             if (fileObj == null || fileObj.ReconNumber == 0)
             {
-                _logger.LogWarning($"Пропускаємо некоректний файл: {Path.GetFileName(filePath)} (Не вдалося розпарсити номер)");
                 continue;
             }
             
-            fileObj.ServerId = serverId;
+            fileObj.StructId = structId;
             
             if (string.IsNullOrEmpty(targetFolder))
             {
@@ -221,14 +212,9 @@ public class IntegrationService : IIntegrationService
                 {
                     targetFolder = await _fileDataRepository.GetTargetFolderByReconIdAsync(fileObj.ReconNumber);
         
-                    if (!string.IsNullOrEmpty(targetFolder))
+                    if (string.IsNullOrEmpty(targetFolder))
                     {
-                        // _logger.LogInformation($"Восстановлен путь для файла {fileObj.FileName} через БД: {targetFolder}");
-                    }
-                    else
-                    {
-                        //_logger.LogWarning($"Не удалось найти путь для ReconID={fileObj.ReconNumber}. Файл пропускается: {filePath}");
-                        continue; // Мы сделали всё что могли. Файл остается в Cache до лучших времен.
+                        continue;
                     }
                 }
                 else
@@ -241,19 +227,19 @@ public class IntegrationService : IIntegrationService
             {
                 if (!Directory.Exists(targetFolder)) Directory.CreateDirectory(targetFolder);
                 
-                MoveFileToStorage(fileObj, targetFolder);
+                await MoveFileToStorageAsync(fileObj, targetFolder);
                 File.Delete(metaPath);
-                SortFileIfNeeded(fileObj, targetFolder);
+                await SortFileIfNeededAsync(fileObj, targetFolder);
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Помилка переміщення файлу {fileObj.FileName}: {ex.Message}");
-                continue; 
+                await _appLog.LogAsync(LogServiceId.Integration, "file_error", $"Переміщення {fileObj.FileName}: {ex.Message}");
+                continue;
             }
-            
+
             var pair = new FilePair();
-            
-            if (fileObj is DataFile df) 
+
+            if (fileObj is DataFile df)
             {
                 pair.Data = df;
                 string expectedRexpr = Path.Combine(cachePath, "REXPR" + df.FileName.Substring(5));
@@ -263,12 +249,12 @@ public class IntegrationService : IIntegrationService
                     pair.Express.FullPath = expectedRexpr;
                     try
                     {
-                        MoveFileToStorage(pair.Express, pair.Data.ParentFolderPath);
+                        await MoveFileToStorageAsync(pair.Express, pair.Data.ParentFolderPath);
                         File.Delete(expectedRexpr + ".meta");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError($"Помилка переміщення файлу {fileObj.FileName}: {ex.Message}");
+                        await _appLog.LogAsync(LogServiceId.Integration, "file_error", $"Переміщення REXPR {fileObj.FileName}: {ex.Message}");
                     }
                 }
             }
@@ -305,51 +291,46 @@ public class IntegrationService : IIntegrationService
         }
     }
     
-    private T MoveFileToStorage<T>(T file, string targetFolder) where T : BaseFile
+    private async Task<T> MoveFileToStorageAsync<T>(T file, string targetFolder) where T : BaseFile
     {
         if (!File.Exists(file.FullPath)) return file;
         try
         {
             string fileName = Path.GetFileName(file.FullPath);
             string destPath = Path.Combine(targetFolder, fileName);
-            
+
             if (!Directory.Exists(targetFolder))
-            {
                 Directory.CreateDirectory(targetFolder);
-            }
 
             if (string.Equals(file.FullPath, destPath, StringComparison.OrdinalIgnoreCase))
-            {
                 return file;
-            }
 
             RemoveReadOnlyAttribute(file.FullPath);
 
             if (File.Exists(destPath))
             {
                 RemoveReadOnlyAttribute(destPath);
-            
-                try 
+                try
                 {
                     File.Delete(destPath);
                 }
                 catch (IOException)
                 {
-                    Thread.Sleep(200);
+                    await Task.Delay(200);
                     File.Delete(destPath);
                 }
             }
-        
-            MoveFileWithRetry(file.FullPath, destPath);
-        
+
+            await MoveFileWithRetryAsync(file.FullPath, destPath);
+
             file.FullPath = destPath;
             file.ParentFolderPath = targetFolder;
-    
+
             return file;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Не вдалося перемістити файл {file.FileName}: {ex.Message}");
+            await _appLog.LogAsync(LogServiceId.Integration, "file_error", $"Не вдалося перемістити {file.FileName}: {ex.Message}");
             return file;
         }
     }
@@ -423,15 +404,14 @@ private async Task ProcessFullArchiveAsync(string rootFolder, string pathToWinRe
         }
         catch (UnauthorizedAccessException)
         {
-            _logger.LogWarning("Немає доступу до папки: {Dir}", objectPath);
+            await _appLog.LogAsync(LogServiceId.Integration, "access_error", $"Немає доступу: {objectPath}");
             processedFolders++;
             progress?.Report((int)((double)processedFolders / totalFolders * 100));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Помилка при обробці об'єкта {Path}: {Msg}", objectPath, ex.Message);
+            await _appLog.LogAsync(LogServiceId.Integration, "object_error", $"{objectPath}: {ex.Message}");
             batch.Clear();
-            
             processedFolders++;
             progress?.Report((int)((double)processedFolders / totalFolders * 100));
         }
@@ -472,7 +452,7 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
             continue;
         }
         
-        SortFileIfNeeded(file, objectPath);
+        await SortFileIfNeededAsync(file, objectPath);
 
         string key = $"{file.ReconNumber}.{file.FileNum}.{file.Timestamp:yyyyMM}";
         
@@ -516,41 +496,26 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
                 process.StartInfo.RedirectStandardError = true;
 
                 if (!process.Start())
-                {
-                    //_logger.LogError($"[{programName}]: Failed to start process.");
                     return false;
-                }
-                
-                var processCompletionTask = process.WaitForExitAsync(); 
-                
+
+                var processCompletionTask = process.WaitForExitAsync();
                 var finishedTask = await Task.WhenAny(processCompletionTask, Task.Delay(TimeoutMilliseconds));
 
                 if (finishedTask == processCompletionTask)
                 {
-                    //await processCompletionTask; 
-                    
                     process.WaitForExit();
-                    
                     return process.ExitCode == 0;
                 }
                 else
                 {
-                    //_logger.LogWarning($"[{programName}]: The process timed out and will be terminated for file: {inputFilePath}");
-                    try
-                    {
-                        process.Kill(true); 
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // Процес міг вже завершитися між перевіркою та Kill
-                    }
+                    try { process.Kill(true); }
+                    catch (InvalidOperationException) { }
                     return false;
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[{programName}]: Exception during external program execution. {ex.Message}");
-                //_logger.LogError(ex, $"[{programName}]: Exception during external program execution.");
                 return false;
             }
         }
@@ -637,62 +602,49 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Помилка при розборі структури папки {Folder}: {Msg}", folder, ex.Message);
+                await _appLog.LogAsync(LogServiceId.Integration, "file_error", $"Розбір структури {folder}: {ex.Message}");
             }
         }
 
         return processedObjects;
     }
     
-    private void SortFileIfNeeded(BaseFile file, string objectRootPath)
+    private async Task SortFileIfNeededAsync(BaseFile file, string objectRootPath)
     {
-        // If the file is already where it should be, exit (your RegEx is correct)
         string currentDir = Path.GetDirectoryName(file.FullPath) ?? "";
         string dirName = Path.GetFileName(currentDir);
         if (System.Text.RegularExpressions.Regex.IsMatch(dirName, @"^\d{4}_\d{2}$")) return;
 
         try
         {
-            // 1. Specify the destination folder
             DateTime fileDate = File.GetLastWriteTime(file.FullPath);
             string targetFolderName = $"{fileDate.Year:D4}_{fileDate.Month:D2}";
             string targetDir = Path.Combine(objectRootPath, targetFolderName);
             string targetPath = Path.Combine(targetDir, file.FileName);
 
-            // If the path has not changed (the file is already there)
             if (string.Equals(file.FullPath, targetPath, StringComparison.OrdinalIgnoreCase)) return;
 
             if (!Directory.Exists(targetDir))
-            {
                 Directory.CreateDirectory(targetDir);
-            }
 
-            // 2. Remove the ReadOnly attribute (this is a common cause of Access Denied)
             RemoveReadOnlyAttribute(file.FullPath);
 
-            // 3. Movement logic
             if (File.Exists(targetPath))
             {
-                // 4. Update the path in the object so that the program continues to work with the new location
-
-                _logger.LogInformation($"Файл {file.FileName} вже існує в цільовій папці. Видаляємо дублікат.");
-            
-                RemoveReadOnlyAttribute(file.FullPath); 
+                RemoveReadOnlyAttribute(file.FullPath);
                 File.Delete(file.FullPath);
             }
             else
             {
-                // Scenario: Move from Retry (if file is busy)
-                MoveFileWithRetry(file.FullPath, targetPath);
+                await MoveFileWithRetryAsync(file.FullPath, targetPath);
             }
 
-            // 4. Update the path in the object so that the program continues to work with the new location
-            file.FullPath = targetPath; 
+            file.FullPath = targetPath;
             file.ParentFolderPath = targetDir;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Не вдалося відсортувати {File}: {Msg}", file.FileName, ex.Message);
+            await _appLog.LogAsync(LogServiceId.Integration, "file_error", $"Сортування {file.FileName}: {ex.Message}");
         }
     }
     
@@ -712,26 +664,25 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
         catch { /* Ignore if the attribute could not be removed */ }
     }
 
-    private void MoveFileWithRetry(string source, string dest, int maxRetries = 3)
+    private async Task MoveFileWithRetryAsync(string source, string dest, int maxRetries = 3)
     {
         for (int i = 0; i < maxRetries; i++)
         {
             try
             {
                 File.Move(source, dest);
-                return; 
+                return;
             }
-            catch (IOException) // File is busy
+            catch (IOException)
             {
-                if (i == maxRetries - 1) throw; // Last attempt - throw an error
-                Thread.Sleep(500); // Waiting 0.5 seconds
+                if (i == maxRetries - 1) throw;
+                await Task.Delay(500);
             }
-            catch (UnauthorizedAccessException) // No permissions or ReadOnly
+            catch (UnauthorizedAccessException)
             {
-                // Let's try removing the attributes again, in case something has changed.
                 RemoveReadOnlyAttribute(source);
                 if (i == maxRetries - 1) throw;
-                Thread.Sleep(500);
+                await Task.Delay(500);
             }
         }
     }
@@ -784,16 +735,14 @@ private async Task IntegrateObjectFilesAsync(string objectPath, string rootFolde
             await pair.Other!.ProcessAsync(rootFolder);
         }
 
-        await _serverRepository.UpdateDailyStatAsync(pair.ServerId, "integrated");
+        await _serverRepository.UpdateDailyStatAsync(pair.StructId, "integrated");
         
         globalBatch.Add(pair);
         if (globalBatch.Count >= transactionBatchSize)
         {
             await _fileDataRepository.InsertBatchAsync(globalBatch);
-            // Після успішного InsertBatchAsync
             _statsService.RegisterAction(ServiceType.Integration, globalBatch.Count);
             globalBatch.Clear();
-            //_logger.LogInformation("Записано пачку {Count} файлів...", transactionBatchSize);
         }
     }
 }
