@@ -113,7 +113,7 @@ public partial class TrayViewModel : ObservableObject
         string message = ShowInputDialog("Введіть повідомлення для користувачів:");
         if (string.IsNullOrWhiteSpace(message)) return;
 
-        var users = await _userRepository.GetAllUserEmailsAsync();
+        var users = await _userRepository.GetActiveUserEmailsAsync();
         if (users.Count == 0)
         {
             MessageBox.Show("Немає активних користувачів для розсилки.");
