@@ -1,8 +1,5 @@
 using System.Windows;
 using System.IO;
-using Microsoft.Win32;
-using System.Security.Cryptography;
-using System.Text;
 using System.Windows.Input;
 using Recon.Core.Interfaces;
 using System.Windows.Forms;
@@ -22,51 +19,48 @@ public partial class AuthWindow : Window
         _authService = authService;
         _configService = configService;
 
-        var creds = LoadParamsFromRegistry();
+        var creds = CredentialStore.Load();
         LoginBox.Text = creds.Login;
         HiddenPasswordBox.Password = creds.Password;
         SaveParamsToRegistryToggle.IsChecked = creds.IsSaveParams;
-        LoadConfigFiles();
+        LoadConfigFiles(creds.ConfigFile);
     }
 
     private async void LoginButton_Click(object sender, RoutedEventArgs e)
     {
         var basePath = AppDomain.CurrentDomain.BaseDirectory;
-        var path = basePath + ConfigComboBox.SelectedItem;
+        var configFile = ConfigComboBox.SelectedItem?.ToString() ?? "";
+        var path = Path.Combine(basePath, configFile);
 
         string login = LoginBox.Text;
         string password = HiddenPasswordBox.IsVisible
             ? HiddenPasswordBox.Password
             : VisiblePasswordBox.Text;
 
-        if (!string.IsNullOrWhiteSpace(login) && !string.IsNullOrWhiteSpace(password))
+        if (string.IsNullOrWhiteSpace(login) || string.IsNullOrWhiteSpace(password))
         {
-            var dbOptions = _configService.LoadDatabaseConfig(path);
-            bool success = await _authService.LoginAsync(login, password, dbOptions);
+            MessageBox.Show("Логін або пароль порожні");
+            return;
+        }
 
-            if (success)
-            {
-                var isSave = SaveParamsToRegistryToggle.IsChecked;
-                if (isSave == true)
-                    SaveParamsToRegistry(login, password, isSave);
+        var dbOptions = _configService.LoadDatabaseConfig(path);
+        bool success = await _authService.LoginAsync(login, password, dbOptions);
 
-                IsAuthenticated = true;
-                DialogResult = true;
-                Close();
-            }
-            else
-            {
-                MessageBox.Show("Невірний логін або пароль.", "Помилка входу",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+        if (success)
+        {
+            CredentialStore.Save(login, password, SaveParamsToRegistryToggle.IsChecked == true, configFile);
+            IsAuthenticated = true;
+            DialogResult = true;
+            Close();
         }
         else
         {
-            MessageBox.Show("Логін або пароль порожні");
+            MessageBox.Show("Невірний логін або пароль.", "Помилка входу",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
-    private void LoadConfigFiles()
+    private void LoadConfigFiles(string lastUsedConfig = "")
     {
         try
         {
@@ -76,8 +70,11 @@ public partial class AuthWindow : Window
             foreach (var filePath in configFiles)
                 ConfigComboBox.Items.Add(Path.GetFileName(filePath));
 
-            if (ConfigComboBox.Items.Count > 0)
-                ConfigComboBox.SelectedIndex = 0;
+            if (ConfigComboBox.Items.Count == 0) return;
+
+            // Select the last used config if it exists; otherwise fall back to the first item
+            int lastIndex = ConfigComboBox.Items.IndexOf(lastUsedConfig);
+            ConfigComboBox.SelectedIndex = lastIndex >= 0 ? lastIndex : 0;
         }
         catch (Exception ex)
         {
@@ -99,7 +96,7 @@ public partial class AuthWindow : Window
         HiddenPasswordBox.Visibility = Visibility.Visible;
     }
 
-    private void Border_MouseLeftButtonDown(object sender,MouseButtonEventArgs e)
+    private void Border_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ButtonState == MouseButtonState.Pressed)
             DragMove();
@@ -109,47 +106,5 @@ public partial class AuthWindow : Window
     {
         DialogResult = false;
         Close();
-    }
-
-    void SaveParamsToRegistry(string username, string password, bool? isSave)
-    {
-        using RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\ReconC#\Integration");
-        if (key != null)
-        {
-            key.SetValue("LastUsedLogin", username);
-            key.SetValue("IsSaveParams", isSave);
-            if (!string.IsNullOrEmpty(password))
-            {
-                byte[] encrypted = ProtectedData.Protect(
-                    Encoding.UTF8.GetBytes(password), null, DataProtectionScope.CurrentUser);
-                key.SetValue("LastUsedPassword", Convert.ToBase64String(encrypted));
-            }
-            else
-            {
-                key.DeleteValue("LastUsedPassword", throwOnMissingValue: false);
-            }
-        }
-    }
-
-    public (string Login, string Password, bool IsSaveParams) LoadParamsFromRegistry()
-    {
-        string login = "", password = "";
-        bool isSaveChecked = false;
-
-        using RegistryKey? key = Registry.CurrentUser.OpenSubKey(@"Software\ReconC#\Integration");
-        if (key != null)
-        {
-            login = key.GetValue("LastUsedLogin")?.ToString() ?? "";
-            isSaveChecked = key.GetValue("IsSaveParams")?.ToString() == "True";
-            string encryptedPass = key.GetValue("LastUsedPassword")?.ToString() ?? "";
-            if (!string.IsNullOrEmpty(encryptedPass))
-            {
-                byte[] decrypted = ProtectedData.Unprotect(
-                    Convert.FromBase64String(encryptedPass), null, DataProtectionScope.CurrentUser);
-                password = Encoding.UTF8.GetString(decrypted);
-            }
-        }
-
-        return (login, password, isSaveChecked);
     }
 }

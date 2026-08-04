@@ -1,3 +1,5 @@
+using System.IO;
+using System.Threading;
 using System.Windows;
 using Hardcodet.Wpf.TaskbarNotification;
 using Microsoft.Extensions.Hosting;
@@ -18,9 +20,20 @@ public partial class App : Application
     private IHost _host;
     private TaskbarIcon _notifyIcon;
     private TrayMenuWindow? _trayMenuWindow;
+    private Mutex? _mutex;
 
     public App()
     {
+        _mutex = new Mutex(initiallyOwned: true, "ReconIntegration_SingleInstance", out bool isNewInstance);
+        if (!isNewInstance)
+        {
+            MessageBox.Show("Програма вже запущена.", "Recon Integration",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            _mutex = null;
+            Shutdown();
+            return;
+        }
+
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .WriteTo.File("logs/general-.log", rollingInterval: RollingInterval.Day)
@@ -67,6 +80,12 @@ public partial class App : Application
         {
             await _host.StartAsync();
 
+            if (await TryAutoLoginAsync())
+            {
+                InitializeTrayIcon();
+                return;
+            }
+
             var authWindow = _host.Services.GetRequiredService<AuthWindow>();
             bool? result = authWindow.ShowDialog();
 
@@ -94,6 +113,43 @@ public partial class App : Application
         }
     }
 
+    private async Task<bool> TryAutoLoginAsync()
+    {
+        var creds = CredentialStore.Load();
+
+        if (!creds.IsSaveParams
+            || string.IsNullOrEmpty(creds.Login)
+            || string.IsNullOrEmpty(creds.Password)
+            || string.IsNullOrEmpty(creds.ConfigFile))
+            return false;
+
+        var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, creds.ConfigFile);
+        if (!File.Exists(configPath))
+            return false;
+
+        try
+        {
+            var configService = _host.Services.GetRequiredService<IConfigService>();
+            var authService   = _host.Services.GetRequiredService<IAuthService>();
+            var dbOptions     = configService.LoadDatabaseConfig(configPath);
+            bool success      = await authService.LoginAsync(creds.Login, creds.Password, dbOptions);
+
+            if (success) return true;
+
+            MessageBox.Show(
+                "Не вдалося виконати автоматичний вхід.\nПеревірте підключення до сервера або введіть дані вручну.",
+                "Помилка автологіну", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Не вдалося виконати автоматичний вхід:\n{ex.Message}\n\nВведіть дані вручну.",
+                "Помилка автологіну", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+    }
+
     private void InitializeTrayIcon()
     {
         _notifyIcon = (TaskbarIcon)FindResource("MyTrayIcon");
@@ -111,6 +167,8 @@ public partial class App : Application
         await _host.StopAsync();
         _host.Dispose();
         Log.CloseAndFlush();
+        _mutex?.ReleaseMutex();
+        _mutex?.Dispose();
         base.OnExit(e);
     }
 }

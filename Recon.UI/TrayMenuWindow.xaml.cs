@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace Recon.UI;
@@ -84,12 +85,23 @@ public partial class TrayMenuWindow : Window
         return CallNextHookEx(_hook, nCode, wParam, lParam);
     }
 
-    // Close after any click on a menu item. Background priority ensures the
-    // element's own command/binding fires first (at Input priority), then we hide.
+    // Hide after clicking a menu action, but not when toggling a module checkbox.
     protected override void OnPreviewMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnPreviewMouseLeftButtonUp(e);
+        if (e.OriginalSource is DependencyObject src && IsInsideCheckBox(src))
+            return;
         Dispatcher.BeginInvoke(DispatcherPriority.Background, Hide);
+    }
+
+    private static bool IsInsideCheckBox(DependencyObject obj)
+    {
+        while (obj != null)
+        {
+            if (obj is System.Windows.Controls.CheckBox) return true;
+            obj = VisualTreeHelper.GetParent(obj);
+        }
+        return false;
     }
 
     protected override void OnClosed(EventArgs e)
