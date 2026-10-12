@@ -1,6 +1,7 @@
 using Dapper;
 using Recon.Core.Infrastructure;
 using Recon.Core.Interfaces.Repositories;
+using Recon.Core.Models;
 
 namespace Recon.Core.Repositories;
 
@@ -19,13 +20,31 @@ public class AppLogRepository : IAppLogRepository
         {
             using var conn = await _db.BuildAndOpenConnectionAsync();
             await conn.ExecuteAsync(
-                "INSERT INTO AppLogs (ServiceId, UserId, ActionType, Details, CreatedAt) " +
-                "VALUES (@ServiceId, @UserId, @ActionType, @Details, GETDATE())",
-                new { ServiceId = serviceId, UserId = userId, ActionType = actionType, Details = details });
+                "sp_InsertAppLog",
+                new { ServiceId = serviceId, UserId = userId, ActionType = actionType, Details = details },
+                commandType: System.Data.CommandType.StoredProcedure);
         }
         catch
         {
             // Логгер не повинен кидати виключення
         }
     }
+
+    public async Task<List<AppLogEntry>> GetLogsAsync(int limit = 20000)
+    {
+        try
+        {
+            using var conn = await _db.BuildAndOpenConnectionAsync();
+            var result = await conn.QueryAsync<AppLogEntry>(@"
+                SELECT TOP (@Limit) Id, ServiceId, ActionType, Details, CreatedAt
+                FROM AppLogs
+                ORDER BY CreatedAt DESC",
+                new { Limit = limit });
+            return result.ToList();
+        }
+        catch { return new List<AppLogEntry>(); }
+    }
+
+    public Task CleanupOldLogsAsync(int keepCount = 20000)
+        => Task.CompletedTask; // чистка вбудована в sp_InsertAppLog
 }

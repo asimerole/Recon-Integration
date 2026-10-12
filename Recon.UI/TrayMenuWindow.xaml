@@ -165,6 +165,12 @@
             <Rectangle Height="1" Fill="#2A2240" Margin="8,2"/>
 
             <!-- Actions -->
+            <Button Content="📋  Журнал інтеграції"
+                    Command="{Binding OpenLogCommand}"
+                    Style="{StaticResource MenuButtonStyle}"/>
+            <Button Content="🔑  Змінити підключення"
+                    Command="{Binding ChangeConnectionCommand}"
+                    Style="{StaticResource MenuButtonStyle}"/>
             <Button Content="📢  Повідомити всіх користувачів"
                     Command="{Binding NotifyAllCommand}"
                     Style="{StaticResource MenuButtonStyle}"/>

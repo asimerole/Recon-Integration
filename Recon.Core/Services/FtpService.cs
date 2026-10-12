@@ -305,7 +305,7 @@ public class FtpService : IFtpService
             bool shouldSend = await _serverRepository.TryMarkDailySentAsync(server.StructId);
             if (!shouldSend) return;
 
-            var recipients = await _userRepository.GetAllUserEmailsAsync();
+            var recipients = await _userRepository.GetActiveUserEmailsAsync();
             if (!recipients.Any()) return;
 
             string subject = $"Суточний файл: {server.Substation} - {server.Object} | {DateTime.Today:dd.MM.yyyy}";

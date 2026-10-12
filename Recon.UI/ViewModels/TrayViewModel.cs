@@ -10,6 +10,8 @@ using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Options;
 using Recon.Core.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Recon.UI;
 
 namespace Recon.UI.ViewModels;
 
@@ -29,6 +31,8 @@ public partial class TrayViewModel : ObservableObject
     private readonly IFileDataRepository _fileDataRepository;
     private readonly IStatisticsService _stats;
     private readonly IDbConnectionFactory _dbFactory;
+    private readonly IAppLogRepository _appLogRepository;
+    private LogWindow? _logWindow;
 
     private bool _dbIsFull;
     private bool _fastDatabaseBuild;
@@ -53,7 +57,8 @@ public partial class TrayViewModel : ObservableObject
         IFileDataRepository fileDataRepository,
         ConfigMonitorService configMonitor,
         IStatisticsService stats,
-        IDbConnectionFactory dbFactory)
+        IDbConnectionFactory dbFactory,
+        IAppLogRepository appLogRepository)
     {
         _ftpService = ftpService;
         _mailService = mailService;
@@ -64,6 +69,7 @@ public partial class TrayViewModel : ObservableObject
         _fileDataRepository = fileDataRepository;
         _stats = stats;
         _dbFactory = dbFactory;
+        _appLogRepository = appLogRepository;
         DatabaseInfo = $"{_dbFactory.DatabaseName} @ {_dbFactory.ServerName}";
 
         _configMonitor = configMonitor;
@@ -105,6 +111,29 @@ public partial class TrayViewModel : ObservableObject
         while (calc.AddMonths(1) <= now) { months++; calc = calc.AddMonths(1); }
         var diff = now - calc;
         UptimeStr = $"Час роботи: {months} міс. {diff.Days} дн. {diff.Hours} год. {diff.Minutes} хв. {diff.Seconds} сек.";
+    }
+
+    [RelayCommand]
+    private void ChangeConnection()
+    {
+        var authWindow = App.Services.GetRequiredService<AuthWindow>();
+        if (authWindow.ShowDialog() == true)
+            MessageBox.Show(
+                "Дані збережено. Перезапустіть програму для підключення з новими налаштуваннями.",
+                "Змінити підключення", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    [RelayCommand]
+    private void OpenLog()
+    {
+        if (_logWindow?.IsVisible == true)
+        {
+            _logWindow.Activate();
+            return;
+        }
+        var vm = new LogViewModel(_appLogRepository);
+        _logWindow = new LogWindow(vm);
+        _logWindow.Show();
     }
 
     [RelayCommand]

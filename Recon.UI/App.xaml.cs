@@ -17,6 +17,8 @@ namespace Recon.UI;
 
 public partial class App : Application
 {
+    public static IServiceProvider Services { get; private set; } = null!;
+
     private IHost _host;
     private TaskbarIcon _notifyIcon;
     private TrayMenuWindow? _trayMenuWindow;
@@ -72,6 +74,8 @@ public partial class App : Application
                 services.AddSingleton<TrayViewModel>();
             })
             .Build();
+
+        Services = _host.Services;
     }
 
     protected override async void OnStartup(StartupEventArgs e)

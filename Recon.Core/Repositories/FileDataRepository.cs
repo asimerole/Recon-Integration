@@ -49,19 +49,11 @@ public class FileDataRepository : IFileDataRepository
 
     public async Task<List<string>> GetRecipientsByReconIdAsync(int reconId, string? objectName = null)
     {
-        string sql = @"
-            SELECT DISTINCT u.login
-            FROM users u
-            JOIN users_units uu ON u.id = uu.user_id
-            JOIN struct_units su ON uu.unit_id = su.unit_id
-            JOIN struct s ON su.struct_id = s.id
-            WHERE s.recon_id = @ReconId
-              AND u.send_mail = 1
-              AND u.status = 1"
-            + (string.IsNullOrEmpty(objectName) ? "" : " AND s.object = @ObjectName");
-
         using var conn = await _db.BuildAndOpenConnectionAsync();
-        var result = await conn.QueryAsync<string>(sql, new { ReconId = reconId, ObjectName = objectName });
+        var result = await conn.QueryAsync<string>(
+            "sp_GetMailRecipientsByReconId",
+            new { ReconId = reconId, ObjectName = objectName },
+            commandType: System.Data.CommandType.StoredProcedure);
         return result.ToList();
     }
 

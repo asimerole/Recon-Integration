@@ -63,7 +63,16 @@ public class MailService : IMailService
     public void AddToQueue(FilePair pair)
     {
         if (pair is { ReconNumber: > 0, Timestamp.Year: > 2000 })
+        {
             _queue.Enqueue(pair);
+            _ = _appLog.LogAsync(LogServiceId.Mail, "mail_queued",
+                $"ReconId={pair.ReconNumber} Object='{pair.Object}' File='{pair.Express?.FileNum ?? pair.Data?.FileNum}' QueueSize={_queue.Count}");
+        }
+        else
+        {
+            _ = _appLog.LogAsync(LogServiceId.Mail, "mail_skip",
+                $"Файл відхилено: ReconNumber={pair.ReconNumber} Timestamp={pair.Timestamp:yyyy-MM-dd HH:mm:ss}");
+        }
     }
 
     private async Task SendingLoop(CancellationToken token)
@@ -90,9 +99,22 @@ public class MailService : IMailService
 
                 try
                 {
+                    await _appLog.LogAsync(LogServiceId.Mail, "mail_processing",
+                        $"Обробка: ReconId={currentReconId} Object='{objectName}' Файлів={miniBatch.Count}");
+
                     var recipients = await _fileDataRepository.GetRecipientsByReconIdAsync(currentReconId, objectName);
-                    if (recipients != null && recipients.Any())
+
+                    if (recipients == null || !recipients.Any())
+                    {
+                        await _appLog.LogAsync(LogServiceId.Mail, "mail_no_recipients",
+                            $"Немає отримувачів для ReconId={currentReconId} Object='{objectName}'");
+                    }
+                    else
+                    {
+                        await _appLog.LogAsync(LogServiceId.Mail, "mail_recipients_found",
+                            $"ReconId={currentReconId}: знайдено {recipients.Count} отримувачів: {string.Join(", ", recipients)}");
                         await SendEmailForGroupAsync(currentReconId, objectName, recipients, miniBatch);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -138,7 +160,7 @@ public class MailService : IMailService
         var rows = await _serverRepository.GetDailyReportAsync(DateTime.Today);
         if (!rows.Any()) return;
 
-        var recipients = await _userRepository.GetAllUserEmailsAsync();
+        var recipients = await _userRepository.GetActiveUserEmailsAsync();
         if (!recipients.Any()) return;
 
         string subject = $"Звіт по стану каналів зв'язку за {DateTime.Today:dd.MM.yyyy}";
@@ -322,13 +344,20 @@ public class MailService : IMailService
         var messageBody = bodyBuilder.ToMessageBody();
         try
         {
+            await _appLog.LogAsync(LogServiceId.Mail, "mail_smtp_connect",
+                $"Підключення до {_config.SmtpServer}:{_config.Port} SSL={_config.UseSsl}");
+
             using var client = new SmtpClient();
             client.CheckCertificateRevocation = false;
             await client.ConnectAsync(_config.SmtpServer, _config.Port,
                 _config.UseSsl ? SecureSocketOptions.Auto : SecureSocketOptions.None);
-            if (!string.IsNullOrEmpty(_config.AuthLogin))
+            if (_config.UseAuth)
                 await client.AuthenticateAsync(_config.AuthLogin, _config.AuthPassword);
 
+            await _appLog.LogAsync(LogServiceId.Mail, "mail_smtp_ok",
+                $"SMTP з'єднання встановлено для {displayObj}");
+
+            int totalSent = 0;
             foreach (string[] userBatch in recipients.Chunk(50))
             {
                 var message = new MimeMessage();
@@ -337,17 +366,30 @@ public class MailService : IMailService
                 message.Subject = subject;
                 message.Body = messageBody;
 
+                var invalidEmails = new List<string>();
                 foreach (var email in userBatch)
                 {
                     if (MailboxAddress.TryParse(email, out var address))
                         message.Bcc.Add(address);
+                    else
+                        invalidEmails.Add(email);
                 }
 
-                if (message.Bcc.Count == 0) continue;
+                if (invalidEmails.Any())
+                    await _appLog.LogAsync(LogServiceId.Mail, "mail_invalid_email",
+                        $"Невалідні адреси (не email?): {string.Join(", ", invalidEmails)}");
+
+                if (message.Bcc.Count == 0)
+                {
+                    await _appLog.LogAsync(LogServiceId.Mail, "mail_no_valid_emails",
+                        $"Пакет для {displayObj}: всі адреси невалідні, лист не відправлено");
+                    continue;
+                }
 
                 try
                 {
                     await client.SendAsync(message);
+                    totalSent += message.Bcc.Count;
                 }
                 catch (SmtpCommandException ex) when (
                     ex.ErrorCode == SmtpErrorCode.RecipientNotAccepted ||
@@ -362,6 +404,8 @@ public class MailService : IMailService
             }
 
             await client.DisconnectAsync(true);
+            await _appLog.LogAsync(LogServiceId.Mail, "mail_sent",
+                $"Надіслано для {displayObj}: {totalSent} отримувачів. Тема: {subject}");
         }
         catch (Exception ex)
         {
