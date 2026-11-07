@@ -19,7 +19,8 @@ public class IntegrationService : IIntegrationService
     private readonly BrokenFileService _brokenFileService;
     private readonly IStatisticsService _statsService;
     private readonly IMailService _mailService;
-    
+    private readonly IOneDriveService _oneDriveService;
+
     private static readonly HashSet<string> IgnoredExtensions = new (StringComparer.OrdinalIgnoreCase)
     {
         ".lock",
@@ -36,8 +37,10 @@ public class IntegrationService : IIntegrationService
 
     public IntegrationService(IFileDataRepository fileDataRepository, IConfigRepository configRepository,
         IServerRepository serverRepository, IAppLogRepository appLog,
-        BrokenFileService brokenFileService, IStatisticsService statisticsService, IMailService mailService)
+        BrokenFileService brokenFileService, IStatisticsService statisticsService, IMailService mailService,
+        IOneDriveService oneDriveService)
     {
+        _oneDriveService = oneDriveService;
         _fileDataRepository = fileDataRepository;
         _configRepository = configRepository;
         _serverRepository = serverRepository;
@@ -136,7 +139,8 @@ public class IntegrationService : IIntegrationService
                     string cachePath = Path.Combine(rootFolder, "Cache");
                     if (Directory.Exists(cachePath))
                     {
-                        await ProcessCacheFolderAsync(rootFolder, pathToOmp, token, globalBatch, TransactionBatchSize);
+                        await ProcessCacheFolderAsync(rootFolder, pathToOmp, token, globalBatch, TransactionBatchSize,
+                            config.IsOneDriveActive);
                     }
                 }
                 await Task.Delay(TimeSpan.FromSeconds(5), token);            
@@ -157,8 +161,9 @@ public class IntegrationService : IIntegrationService
     private async Task ProcessCacheFolderAsync(string rootFolder, 
         string pathToOmpExecutable, 
         CancellationToken token,
-        List<FilePair> globalBatch, 
-        int transactionBatchSize)
+        List<FilePair> globalBatch,
+        int transactionBatchSize,
+        bool isOneDriveActive)
     {
         string cachePath = Path.Combine(rootFolder, "Cache");
         var allFiles = Directory.GetFiles(cachePath)
@@ -168,7 +173,9 @@ public class IntegrationService : IIntegrationService
         foreach (var filePath in allFiles)
         {
             if (token.IsCancellationRequested) return;
-            
+            // REXPR/RECON may already have been moved earlier in this pass together with its pair
+            if (!File.Exists(filePath)) continue;
+
             string metaPath = filePath + ".meta";
             string targetFolder = null;
             int structId = 0;
@@ -266,13 +273,23 @@ public class IntegrationService : IIntegrationService
                 string expectedRecon = Path.Combine(cachePath, dataFileName);
                 if (File.Exists(expectedRecon))
                 {
-                    pair.Data = new DataFile() 
-                    { 
-                        FullPath = expectedRecon, 
+                    pair.Data = new DataFile()
+                    {
+                        FullPath = expectedRecon,
                         FileName = dataFileName,
-                        ParentFolderPath = targetFolder 
+                        ParentFolderPath = targetFolder
                     };
-                    pair.Data.ParseFileNameProperties(); 
+                    pair.Data.ParseFileNameProperties();
+                    try
+                    {
+                        // Otherwise RECON stays in Cache and is processed again on the next pass
+                        await MoveFileToStorageAsync(pair.Data, pair.Express.ParentFolderPath);
+                        File.Delete(expectedRecon + ".meta");
+                    }
+                    catch (Exception ex)
+                    {
+                        await _appLog.LogAsync(LogServiceId.Integration, "file_error", $"Переміщення RECON {fileObj.FileName}: {ex.Message}");
+                    }
                 }
             }
             else if (fileObj is ReconFile rf)
@@ -282,6 +299,7 @@ public class IntegrationService : IIntegrationService
             }
             
             await ProcessFilePairAsync(pair, rootFolder, pathToOmpExecutable, globalBatch, transactionBatchSize);
+            if (isOneDriveActive) await CopyPairToOneDriveAsync(pair, rootFolder, cachePath);
             _mailService.AddToQueue(pair);
         }
         if (globalBatch.Count > 0)
@@ -291,6 +309,24 @@ public class IntegrationService : IIntegrationService
         }
     }
     
+    private async Task CopyPairToOneDriveAsync(FilePair pair, string rootFolder, string cachePath)
+    {
+        int copied = 0;
+        foreach (BaseFile? file in new BaseFile?[] { pair.Data, pair.Express, pair.Other })
+        {
+            if (file == null || !File.Exists(file.FullPath)) continue;
+            // A paired file left in Cache is not in its final place yet; it is copied on its own pass
+            if (file.FullPath.StartsWith(cachePath, StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (await _oneDriveService.CopyFromStorageAsync(file.FullPath, rootFolder))
+                copied++;
+        }
+
+        if (copied == 0) return;
+        await _serverRepository.UpdateDailyStatAsync(pair.StructId, "uploaded");
+        _statsService.RegisterAction(ServiceType.OneDrive, copied);
+    }
+
     private async Task<T> MoveFileToStorageAsync<T>(T file, string targetFolder) where T : BaseFile
     {
         if (!File.Exists(file.FullPath)) return file;

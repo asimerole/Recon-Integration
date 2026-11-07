@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Dapper;
 using Microsoft.Extensions.Logging;
@@ -34,7 +35,23 @@ public class ConfigRepository : IConfigRepository
         try
         {
             using var conn = await _db.BuildAndOpenConnectionAsync();
-            await conn.ExecuteAsync(sql, new { Json = JsonSerializer.Serialize(config) });
+
+            // Merge into the stored JSON: Recon-Properties keeps its own flags there
+            // (restrictions, mailIntegrationIsActive) which this app must not wipe
+            var row = await conn.QuerySingleOrDefaultAsync(
+                "sp_GetAccessSettingByName",
+                new { Name = "file_integration" },
+                commandType: System.Data.CommandType.StoredProcedure);
+            var json = TryParseObject((string?)row?.value);
+
+            json["integrationIsActive"] = config.IsIntegrationActive;
+            json["ftpIsActive"]         = config.IsFtpActive;
+            json["mailIsActive"]        = config.IsMailActive;
+            json["oneDriveIsActive"]    = config.IsOneDriveActive;
+            json["dbIsFull"]            = config.DbIsFull;
+            json["fastDbBuild"]         = config.FastDatabaseBuild;
+
+            await conn.ExecuteAsync(sql, new { Json = json.ToJsonString() });
         }
         catch (Exception ex)
         {
@@ -56,6 +73,19 @@ public class ConfigRepository : IConfigRepository
 
     public async Task<int> GetFeedingTimeAsync() =>
         await GetSettingAsync<int>("feeding_cycle", 0);
+
+    private static JsonObject TryParseObject(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return new JsonObject();
+        try
+        {
+            return JsonNode.Parse(raw) as JsonObject ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            return new JsonObject();
+        }
+    }
 
     private async Task<T?> GetSettingAsync<T>(string settingName, T? defaultValue = default)
     {

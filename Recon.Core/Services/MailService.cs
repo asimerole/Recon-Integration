@@ -36,15 +36,18 @@ public class MailService : IMailService
         _userRepository = userRepository;
     }
 
+    public bool IsRunning => _sendingTask is { IsCompleted: false };
+
     public void StartSendingLoop()
     {
-        if (_sendingTask != null && !_sendingTask.IsCompleted) return;
+        if (IsRunning) return;
 
         _cts = new CancellationTokenSource();
+        var token = _cts.Token;
         _sendingTask = Task.Run(async () =>
         {
-            _config = await _configRepository.GetMailServerConfigAsync();
-            await SendingLoop(_cts.Token);
+            await EnsureConfigAsync(forceReload: true);
+            await SendingLoop(token);
         });
         _reportTask = Task.Run(() => DailyReportLoop(_cts.Token));
 
@@ -62,6 +65,9 @@ public class MailService : IMailService
 
     public void AddToQueue(FilePair pair)
     {
+        // Module is off: nobody would drain the queue, it would only grow in memory
+        if (!IsRunning) return;
+
         if (pair is { ReconNumber: > 0, Timestamp.Year: > 2000 })
         {
             _queue.Enqueue(pair);
@@ -206,13 +212,31 @@ public class MailService : IMailService
         return sb.ToString();
     }
 
+    // "Повідомити всіх" can send while the module is off, so settings are loaded on demand
+    private async Task<bool> EnsureConfigAsync(bool forceReload = false)
+    {
+        if (forceReload || string.IsNullOrEmpty(_config.SmtpServer))
+        {
+            try
+            {
+                _config = await _configRepository.GetMailServerConfigAsync() ?? new MailServerConfig();
+            }
+            catch (Exception ex)
+            {
+                await _appLog.LogAsync(LogServiceId.Mail, "mail_error", $"Завантаження налаштувань SMTP: {ex.Message}");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(_config.SmtpServer)) return true;
+
+        await _appLog.LogAsync(LogServiceId.Mail, "mail_error",
+            "Відсутні налаштування SMTP (access_settings → mail → \"SMTP server\")");
+        return false;
+    }
+
     public async Task SendToAllAsync(IEnumerable<string> recipients, string subject, string body, IEnumerable<string>? attachments = null)
     {
-        if (string.IsNullOrEmpty(_config.SmtpServer))
-        {
-            await _appLog.LogAsync(LogServiceId.Mail, "mail_error", "Відсутні налаштування SMTP");
-            return;
-        }
+        if (!await EnsureConfigAsync()) return;
 
         const int batchSize = 50;
         var bodyBuilder = new BodyBuilder { TextBody = body };
@@ -308,11 +332,7 @@ public class MailService : IMailService
     private async Task SendEmailForGroupAsync(int reconId, string objectName, List<string> recipients, List<FilePair> files)
     {
         if (!files.Any()) return;
-        if (string.IsNullOrEmpty(_config.SmtpServer))
-        {
-            await _appLog.LogAsync(LogServiceId.Mail, "mail_error", "Відсутні налаштування SMTP");
-            return;
-        }
+        if (!await EnsureConfigAsync()) return;
 
         var firstFile = files.First();
         string displayObj = string.IsNullOrEmpty(objectName) ? $"Об'єкт {reconId}" : objectName;

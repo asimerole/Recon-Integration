@@ -6,7 +6,7 @@ namespace Recon.Core.Options;
 public class MailServerConfig
 {
     [JsonPropertyName("SMTP server")]
-    public string SmtpServer { get; set; }
+    public string SmtpServer { get; set; } = string.Empty;
     
     [JsonPropertyName("auth")]
     public bool UseAuth { get; set; } = false;
@@ -14,8 +14,15 @@ public class MailServerConfig
     [JsonPropertyName("email_sender")]
     public string EmailSender { get; set; } = string.Empty;
     
+    // Recon-Properties (WPF) writes "template", old C++ Properties wrote "msg_template"
+    [JsonPropertyName("template")]
+    public string Template { get; set; } = string.Empty;
+
     [JsonPropertyName("msg_template")]
-    public string MsgTemplate { get; set; } = string.Empty;
+    public string LegacyMsgTemplate { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string MsgTemplate => !string.IsNullOrEmpty(Template) ? Template : LegacyMsgTemplate;
     
     [JsonPropertyName("name_sender")]
     public string NameSender { get; set; } = "Recon Service";

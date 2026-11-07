@@ -14,6 +14,9 @@ public interface IMailService
 
     void AddToQueue(FilePair pair);
 
+    // True while the "Поштова розсилка" module is switched on
+    bool IsRunning { get; }
+
     void StartSendingLoop();
     void StopSendingLoop();
 }

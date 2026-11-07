@@ -84,4 +84,8 @@ public partial class LogViewModel : ObservableObject
     public void StopTimer() => _refreshTimer.Stop();
 }
 
-public record ServiceFilterOption(int Id, string Name);
+public record ServiceFilterOption(int Id, string Name)
+{
+    // The custom ComboBox template shows the selected item via ToString()
+    public override string ToString() => Name;
+}

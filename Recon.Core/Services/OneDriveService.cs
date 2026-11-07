@@ -1,16 +1,21 @@
 using Recon.Core.Constants;
 using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
+using Recon.Core.Options;
 using System.IO;
 
 namespace Recon.Core.Services;
 
 public class OneDriveService : IOneDriveService
 {
+    private static readonly TimeSpan ConfigTtl = TimeSpan.FromMinutes(1);
+
     private readonly IAppLogRepository _appLog;
     private readonly IConfigRepository _configRepository;
-    private string? _rootPath;
-    private int _days;
+
+    private OneDriveConfig? _config;
+    private DateTime _configLoadedAt;
+    private bool _pathMissingLogged;
 
     private CancellationTokenSource? _cts;
 
@@ -20,22 +25,46 @@ public class OneDriveService : IOneDriveService
         _configRepository = configRepository;
     }
 
-    public void CopyToOneDrive(string localSourcePath, string relativePath)
+    public async Task<bool> CopyFromStorageAsync(string sourceFullPath, string storageRoot)
     {
-        if (string.IsNullOrEmpty(_rootPath)) return;
+        var config = await GetConfigAsync();
+        if (string.IsNullOrWhiteSpace(config.Path))
+        {
+            // Log once per config load, otherwise every file would spam the log
+            if (!_pathMissingLogged)
+            {
+                _pathMissingLogged = true;
+                await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_skip",
+                    "Не задано шлях OneDrive (access_settings → onedrive → local_path)");
+            }
+            return false;
+        }
+
+        string relativePath = Path.GetRelativePath(storageRoot, sourceFullPath);
+        if (relativePath.StartsWith("..") || Path.IsPathRooted(relativePath))
+        {
+            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_skip",
+                $"Файл поза кореневою папкою: {sourceFullPath}");
+            return false;
+        }
 
         try
         {
-            string destPath = Path.Combine(_rootPath, relativePath);
-            string destDir = Path.GetDirectoryName(destPath)!;
+            string destPath = Path.Combine(config.Path, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
 
-            if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+            File.Copy(sourceFullPath, destPath, overwrite: true);
+            // Copy keeps the device's LastWriteTime; cleanup counts days from arrival instead
+            File.SetCreationTime(destPath, DateTime.Now);
 
-            File.Copy(localSourcePath, destPath, true);
+            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_copied", relativePath);
+            return true;
         }
         catch (Exception ex)
         {
-            _ = _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Копіювання {relativePath}: {ex.Message}");
+            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error",
+                $"Копіювання {relativePath}: {ex.Message}");
+            return false;
         }
     }
 
@@ -45,20 +74,7 @@ public class OneDriveService : IOneDriveService
         _cts = new CancellationTokenSource();
 
         var token = _cts.Token;
-        Task.Run(async () =>
-        {
-            try
-            {
-                var config = await _configRepository.GetOneDriveConfigAsync();
-                _rootPath = config.Path;
-                _days = config.Days;
-            }
-            catch (Exception ex)
-            {
-                await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Завантаження конфігурації: {ex.Message}");
-            }
-            await CleanupLoop(token);
-        });
+        Task.Run(() => CleanupLoop(token));
     }
 
     public void StopCleanupScheduler()
@@ -67,26 +83,48 @@ public class OneDriveService : IOneDriveService
         _cts = null;
     }
 
-    private async Task CleanupLoop(CancellationToken token)
+    private async Task<OneDriveConfig> GetConfigAsync()
     {
+        if (_config != null && DateTime.Now - _configLoadedAt < ConfigTtl)
+            return _config;
+
         try
         {
-            while (!token.IsCancellationRequested)
-            {
-                TimeSpan delay = CalculateDelayToNextRun(0, 10);
-                await Task.Delay(delay, token);
-                CleanUpOldFiles(_days);
-            }
+            _config = await _configRepository.GetOneDriveConfigAsync() ?? new OneDriveConfig();
+            _configLoadedAt = DateTime.Now;
+            _pathMissingLogged = false;
         }
-        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Планувальник: {ex.Message}");
-            await Task.Delay(TimeSpan.FromMinutes(5), CancellationToken.None);
+            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Завантаження конфігурації: {ex.Message}");
+            _config ??= new OneDriveConfig();
+        }
+        return _config;
+    }
+
+    private async Task CleanupLoop(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(CalculateDelayToNextRun(0, 10), token);
+                var config = await GetConfigAsync();
+                await CleanUpOldFilesAsync(config.Path, config.Days);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Планувальник: {ex.Message}");
+                await Task.Delay(TimeSpan.FromMinutes(5), CancellationToken.None);
+            }
         }
     }
 
-    private TimeSpan CalculateDelayToNextRun(int targetHour, int targetMinute)
+    private static TimeSpan CalculateDelayToNextRun(int targetHour, int targetMinute)
     {
         DateTime now = DateTime.Now;
         DateTime nextRun = now.Date.AddHours(targetHour).AddMinutes(targetMinute);
@@ -94,40 +132,41 @@ public class OneDriveService : IOneDriveService
         return nextRun - now;
     }
 
-    private void CleanUpOldFiles(int daysToKeep)
+    private async Task CleanUpOldFilesAsync(string rootPath, int daysToKeep)
     {
-        if (string.IsNullOrEmpty(_rootPath) || !Directory.Exists(_rootPath)) return;
+        if (string.IsNullOrEmpty(rootPath) || !Directory.Exists(rootPath) || daysToKeep <= 0) return;
 
         DateTime cutoffDate = DateTime.Now.AddDays(-daysToKeep);
+        int deleted = 0;
         try
         {
-            var files = Directory.GetFiles(_rootPath, "*.*", SearchOption.AllDirectories);
-            foreach (var file in files)
+            foreach (var file in Directory.GetFiles(rootPath, "*.*", SearchOption.AllDirectories))
             {
                 var fileInfo = new FileInfo(file);
-                if (fileInfo.LastWriteTime < cutoffDate)
+                if (fileInfo.CreationTime >= cutoffDate) continue;
+
+                try
                 {
-                    try
-                    {
-                        fileInfo.Attributes = FileAttributes.Normal;
-                        fileInfo.Delete();
-                    }
-                    catch (Exception delEx)
-                    {
-                        _ = _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Видалення {fileInfo.Name}: {delEx.Message}");
-                    }
+                    fileInfo.Attributes = FileAttributes.Normal;
+                    fileInfo.Delete();
+                    deleted++;
+                }
+                catch (Exception delEx)
+                {
+                    await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Видалення {fileInfo.Name}: {delEx.Message}");
                 }
             }
 
-            DeleteEmptyDirectories(_rootPath);
+            DeleteEmptyDirectories(rootPath);
+            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_cleanup", $"Видалено файлів старших за {daysToKeep} дн.: {deleted}");
         }
         catch (Exception ex)
         {
-            _ = _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Очистка: {ex.Message}");
+            await _appLog.LogAsync(LogServiceId.OneDrive, "onedrive_error", $"Очистка: {ex.Message}");
         }
     }
 
-    private void DeleteEmptyDirectories(string root)
+    private static void DeleteEmptyDirectories(string root)
     {
         foreach (var dir in Directory.GetDirectories(root, "*", SearchOption.AllDirectories)
                      .OrderByDescending(d => d.Length))

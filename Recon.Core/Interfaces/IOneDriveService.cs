@@ -1,10 +1,12 @@
-﻿using Recon.Core.Options;
-
 namespace Recon.Core.Interfaces;
 
 public interface IOneDriveService
 {
-    void CopyToOneDrive(string localSourcePath, string relativePath);
+    /// <summary>
+    /// Copies a file that already sits in the storage (root_directory) into the OneDrive folder,
+    /// keeping the same relative path. Returns true if the file was copied.
+    /// </summary>
+    Task<bool> CopyFromStorageAsync(string sourceFullPath, string storageRoot);
 
     void StartCleanupScheduler();
 

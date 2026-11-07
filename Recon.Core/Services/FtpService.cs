@@ -17,26 +17,22 @@ public class FtpService : IFtpService
     private readonly IConfigRepository _configRepository;
     private readonly IServerRepository _serverRepository;
     private readonly IAppLogRepository _appLog;
-    private readonly IOneDriveService _oneDriveService;
     private readonly IStatisticsService _statsService;
     private readonly IMailService _mailService;
     private readonly IUserRepository _userRepository;
 
-    private string _ftpCacheDir;
-    private OneDriveConfig _oneDriveConfig;
-    private bool _isOneDriveActive;
+    private string _ftpCacheDir = string.Empty;
 
     private CancellationTokenSource? _cts;
     private Task? _workingTask;
 
     public FtpService(IConfigRepository configRepository, IServerRepository serverRepository,
-        IAppLogRepository appLog, IOneDriveService oneDriveService, IStatisticsService statsService,
+        IAppLogRepository appLog, IStatisticsService statsService,
         IMailService mailService, IUserRepository userRepository)
     {
         _configRepository = configRepository;
         _serverRepository = serverRepository;
         _appLog = appLog;
-        _oneDriveService = oneDriveService;
         _statsService = statsService;
         _mailService = mailService;
         _userRepository = userRepository;
@@ -71,9 +67,6 @@ public class FtpService : IFtpService
                 var config = await _configRepository.GetModuleConfigAsync();
                 if (!config.IsFtpActive) break;
 
-                _isOneDriveActive = config.IsOneDriveActive;
-                _oneDriveConfig = await _configRepository.GetOneDriveConfigAsync();
-
                 List<ServerInfo> servers = await _serverRepository.GetAllServersAsync();
 
                 _ftpCacheDir = rootFolder + @"/Cache";
@@ -85,7 +78,6 @@ public class FtpService : IFtpService
                     if (token.IsCancellationRequested) break;
 
                     CreateLocalDirectoryTree(server, rootFolder);
-                    if (_isOneDriveActive) CreateLocalDirectoryTree(server, _oneDriveConfig.Path);
 
                     await ProcessServerAsync(server, token);
                 }
@@ -246,26 +238,6 @@ public class FtpService : IFtpService
                 );
                 
                 _statsService.RegisterAction(ServiceType.Ftp, 1);
-                
-                if (_isOneDriveActive)
-                {
-                    try
-                    {
-                        var relativePath = GetServerDirTree(server);
-                        relativePath = Path.Combine(relativePath, item.Name);
-                        _oneDriveService.CopyToOneDrive(tempLocalPath, relativePath);
-                        await _serverRepository.UpdateDailyStatAsync(server.StructId, "uploaded");
-                        _statsService.RegisterAction(ServiceType.OneDrive, 1);
-                    }
-                    catch (IOException ioEx)
-                    {
-                        await _appLog.LogAsync(LogServiceId.Ftp, "onedrive_error", $"Файл зайнятий: {ioEx.Message}");
-                    }
-                    catch (Exception ex)
-                    {
-                        await _appLog.LogAsync(LogServiceId.Ftp, "onedrive_error", ex.Message);
-                    }
-                }
 
                 try
                 {
@@ -300,6 +272,9 @@ public class FtpService : IFtpService
     
     private async Task SendDailyFileAsync(ServerInfo server, string filePath)
     {
+        // Mail module is off: don't mark the daily file as sent, it was never sent
+        if (!_mailService.IsRunning) return;
+
         try
         {
             bool shouldSend = await _serverRepository.TryMarkDailySentAsync(server.StructId);
