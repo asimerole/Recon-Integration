@@ -84,7 +84,7 @@ public partial class App : Application
         {
             await _host.StartAsync();
 
-            if (await TryAutoLoginAsync())
+            if (await TryAutoLoginAsync(e.Args))
             {
                 InitializeTrayIcon();
                 return;
@@ -117,19 +117,33 @@ public partial class App : Application
         }
     }
 
-    private async Task<bool> TryAutoLoginAsync()
+    // Auto-login rules:
+    //   --autostart (Task Scheduler)  → always, with the last used config
+    //   manual start, one *.recon     → automatically, nothing to choose
+    //   manual start, several *.recon → login window, the user picks the config
+    private async Task<bool> TryAutoLoginAsync(string[] args)
     {
         var creds = CredentialStore.Load();
 
         if (!creds.IsSaveParams
             || string.IsNullOrEmpty(creds.Login)
-            || string.IsNullOrEmpty(creds.Password)
-            || string.IsNullOrEmpty(creds.ConfigFile))
+            || string.IsNullOrEmpty(creds.Password))
             return false;
 
-        var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, creds.ConfigFile);
-        if (!File.Exists(configPath))
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        string[] configs = Directory.GetFiles(baseDir, "*.recon");
+        bool isAutostart = args.Any(a => a.Equals("--autostart", StringComparison.OrdinalIgnoreCase));
+
+        string? configFile = null;
+        if (isAutostart && !string.IsNullOrEmpty(creds.ConfigFile) && File.Exists(Path.Combine(baseDir, creds.ConfigFile)))
+            configFile = creds.ConfigFile;
+        else if (configs.Length == 1)
+            configFile = Path.GetFileName(configs[0]);
+
+        if (configFile == null)
             return false;
+
+        var configPath = Path.Combine(baseDir, configFile);
 
         try
         {

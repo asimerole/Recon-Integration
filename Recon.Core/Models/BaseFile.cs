@@ -97,22 +97,22 @@ public abstract class BaseFile
         return false;
     }
     
+    // RECON353.300 / REXPR353.300 / DAILY353.300 / RNET353.300:
+    // letters = prefix, next 3 digits = recon number, last 3 = file number.
+    // The prefix is not always 5 letters (RNET), so it is measured instead of assumed.
     protected internal void ParseFileNameProperties()
     {
-        if (FileName.Length >= 8) 
-        {
-            FilePrefix = FileName.Substring(0, 5); 
-            FileNum = FileName.Substring(FileName.Length - 3); 
-        
-            if (int.TryParse(FileName.Substring(5, 3), out int reconNum))
-            {
-                ReconNumber = reconNum;
-            }
-            else
-            {
-                ReconNumber = 0;
-            }
-            
-        }
+        int prefixLength = 0;
+        while (prefixLength < FileName.Length && char.IsLetter(FileName[prefixLength]))
+            prefixLength++;
+
+        ReconNumber = 0;
+        if (prefixLength == 0 || FileName.Length < prefixLength + 3) return;
+
+        FilePrefix = FileName.Substring(0, prefixLength);
+        FileNum = FileName.Substring(FileName.Length - 3);
+
+        if (int.TryParse(FileName.AsSpan(prefixLength, 3), out int reconNum))
+            ReconNumber = reconNum;
     }
 }

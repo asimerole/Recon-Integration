@@ -196,7 +196,8 @@ public class IntegrationService : IIntegrationService
                                 structId = val;
                         }
                     }
-                    if (!string.IsNullOrWhiteSpace(targetFolder)) File.Delete(metaPath);
+                    // .meta is deleted only after a successful move below: if the file is skipped now,
+                    // the next pass still needs its target path
                 }
                 catch (JsonException exception)
                 {
@@ -208,25 +209,19 @@ public class IntegrationService : IIntegrationService
             var fileObj = BaseFileFactory.Create(filePath);
             if (fileObj == null || fileObj.ReconNumber == 0)
             {
+                await ParkIfStaleAsync(cachePath, filePath, "не вдалося розібрати ім'я файлу (номер реєстратора)");
                 continue;
             }
-            
+
             fileObj.StructId = structId;
-            
+
             if (string.IsNullOrEmpty(targetFolder))
             {
-                if (fileObj.ReconNumber > 0)
+                targetFolder = await _fileDataRepository.GetTargetFolderByReconIdAsync(fileObj.ReconNumber);
+                if (string.IsNullOrEmpty(targetFolder))
                 {
-                    targetFolder = await _fileDataRepository.GetTargetFolderByReconIdAsync(fileObj.ReconNumber);
-        
-                    if (string.IsNullOrEmpty(targetFolder))
-                    {
-                        continue;
-                    }
-                }
-                else
-                {
-                    continue; 
+                    await ParkIfStaleAsync(cachePath, filePath, $"реєстратор №{fileObj.ReconNumber} не знайдено в struct");
+                    continue;
                 }
             }
 
@@ -306,6 +301,60 @@ public class IntegrationService : IIntegrationService
         {
             await _fileDataRepository.InsertBatchAsync(globalBatch);
             globalBatch.Clear();
+        }
+
+        DeleteCacheLeftovers(cachePath);
+    }
+
+    // A file that still can't be placed after this long won't resolve by itself
+    private static readonly TimeSpan UnresolvedAfter = TimeSpan.FromDays(1);
+
+    private async Task ParkIfStaleAsync(string cachePath, string filePath, string reason)
+    {
+        try
+        {
+            // CreationTime = when it landed in Cache (LastWriteTime is the device's event time)
+            if (DateTime.Now - File.GetCreationTime(filePath) < UnresolvedAfter) return;
+
+            string parkDir = Path.Combine(cachePath, "Unresolved");
+            Directory.CreateDirectory(parkDir);
+            string dest = Path.Combine(parkDir, Path.GetFileName(filePath));
+
+            File.Move(filePath, dest, overwrite: true);
+            if (File.Exists(filePath + ".meta"))
+                File.Move(filePath + ".meta", dest + ".meta", overwrite: true);
+
+            await _appLog.LogAsync(LogServiceId.Integration, "file_unresolved",
+                $"{Path.GetFileName(filePath)} → Cache\\Unresolved: {reason}");
+        }
+        catch (Exception ex)
+        {
+            await _appLog.LogAsync(LogServiceId.Integration, "file_error",
+                $"Перенесення {Path.GetFileName(filePath)} в Unresolved: {ex.Message}");
+        }
+    }
+
+    // .meta without its file and .tmp from interrupted downloads are never picked up by anything
+    private static void DeleteCacheLeftovers(string cachePath)
+    {
+        foreach (var path in Directory.GetFiles(cachePath))
+        {
+            try
+            {
+                string ext = Path.GetExtension(path);
+                bool orphanMeta = ext.Equals(".meta", StringComparison.OrdinalIgnoreCase)
+                                  && !File.Exists(path[..^".meta".Length]);
+                bool staleTmp = ext.Equals(".tmp", StringComparison.OrdinalIgnoreCase);
+
+                if (!orphanMeta && !staleTmp) continue;
+
+                // FTP may stamp a fresh download with the device's old modified time — take the latest of both
+                DateTime touched = File.GetCreationTime(path) > File.GetLastWriteTime(path)
+                    ? File.GetCreationTime(path) : File.GetLastWriteTime(path);
+                if (DateTime.Now - touched > UnresolvedAfter)
+                    File.Delete(path);
+            }
+            catch { /* locked by FTP right now — next pass */ }
         }
     }
     

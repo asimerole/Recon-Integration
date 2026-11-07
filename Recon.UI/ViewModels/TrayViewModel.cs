@@ -42,7 +42,6 @@ public partial class TrayViewModel : ObservableObject
     [ObservableProperty] private string _version;
     [ObservableProperty] private string _progress = string.Empty;
     [ObservableProperty] private int _integrationPercent;
-    [ObservableProperty] private string _databaseInfo;
     [ObservableProperty] private bool _isFtpActive;
     [ObservableProperty] private bool _isIntegrationActive;
     [ObservableProperty] private bool _isMailActive;
@@ -70,7 +69,6 @@ public partial class TrayViewModel : ObservableObject
         _stats = stats;
         _dbFactory = dbFactory;
         _appLogRepository = appLogRepository;
-        DatabaseInfo = $"{_dbFactory.DatabaseName} @ {_dbFactory.ServerName}";
 
         _configMonitor = configMonitor;
         _configMonitor.OnConfigChanged += OnRemoteConfigReceived;
@@ -97,6 +95,10 @@ public partial class TrayViewModel : ObservableObject
             }));
     }
 
+    // Shown on separate lines in the tray header: "БД @ сервер,порт" didn't fit the 260px menu
+    public string DatabaseName => _dbFactory.DatabaseName;
+    public string ServerName => _dbFactory.ServerName;
+
     public string UptimeStr
     {
         get => _uptimeStr;
@@ -110,7 +112,11 @@ public partial class TrayViewModel : ObservableObject
         int months = 0;
         while (calc.AddMonths(1) <= now) { months++; calc = calc.AddMonths(1); }
         var diff = now - calc;
-        UptimeStr = $"Час роботи: {months} міс. {diff.Days} дн. {diff.Hours} год. {diff.Minutes} хв. {diff.Seconds} сек.";
+        // Compact so it fits one line: zero months/days are omitted, e.g. "1 дн. 01:07:23"
+        string time = $"{diff.Hours:00}:{diff.Minutes:00}:{diff.Seconds:00}";
+        UptimeStr = months > 0     ? $"{months} міс. {diff.Days} дн. {time}"
+                  : diff.Days > 0  ? $"{diff.Days} дн. {time}"
+                  : time;
     }
 
     [RelayCommand]

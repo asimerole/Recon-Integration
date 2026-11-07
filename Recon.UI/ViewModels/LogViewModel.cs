@@ -18,6 +18,8 @@ public partial class LogViewModel : ObservableObject
     [ObservableProperty] private int     _selectedServiceId = 0;
     [ObservableProperty] private string  _statusText        = "Завантаження...";
     [ObservableProperty] private bool    _autoRefresh       = true;
+    [ObservableProperty] private DateTime? _dateFrom;
+    [ObservableProperty] private DateTime? _dateTo;
 
     public List<ServiceFilterOption> ServiceOptions { get; } = new()
     {
@@ -41,6 +43,23 @@ public partial class LogViewModel : ObservableObject
 
     partial void OnSearchTextChanged(string value)        => ApplyFilter();
     partial void OnSelectedServiceIdChanged(int value)    => ApplyFilter();
+    partial void OnDateFromChanged(DateTime? value)       => ApplyFilter();
+    partial void OnDateToChanged(DateTime? value)         => ApplyFilter();
+
+    private bool _suspendFilter;
+
+    [RelayCommand]
+    private void ResetFilters()
+    {
+        // One ApplyFilter instead of four re-filters of 20k rows
+        _suspendFilter = true;
+        SearchText = string.Empty;
+        SelectedServiceId = 0;
+        DateFrom = null;
+        DateTo = null;
+        _suspendFilter = false;
+        ApplyFilter();
+    }
     partial void OnAutoRefreshChanged(bool value)
     {
         if (value) _refreshTimer.Start();
@@ -58,15 +77,26 @@ public partial class LogViewModel : ObservableObject
 
     private void ApplyFilter()
     {
+        if (_suspendFilter) return;
         IEnumerable<AppLogEntry> view = _allLogs;
 
         if (SelectedServiceId > 0)
             view = view.Where(l => l.ServiceId == SelectedServiceId);
 
-        if (!string.IsNullOrWhiteSpace(SearchText))
+        // Date pickers give midnight; "по" includes the whole selected day
+        if (DateFrom.HasValue)
+            view = view.Where(l => l.CreatedAt >= DateFrom.Value.Date);
+        if (DateTo.HasValue)
+            view = view.Where(l => l.CreatedAt < DateTo.Value.Date.AddDays(1));
+
+        // Every word must be found somewhere in the row: "353 error" → errors of registrator 353
+        var words = SearchText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length > 0)
             view = view.Where(l =>
-                l.ActionType.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-                l.Details?.Contains(SearchText, StringComparison.OrdinalIgnoreCase) == true);
+            {
+                string row = $"{l.CreatedAt:dd.MM.yy HH:mm:ss} {l.ServiceName} {l.ActionType} {l.Details}";
+                return words.All(w => row.Contains(w, StringComparison.OrdinalIgnoreCase));
+            });
 
         var list = view.ToList();
         Logs = new ObservableCollection<AppLogEntry>(list);

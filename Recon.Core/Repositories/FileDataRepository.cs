@@ -47,12 +47,12 @@ public class FileDataRepository : IFileDataRepository
         return result?.ToString();
     }
 
-    public async Task<List<string>> GetRecipientsByReconIdAsync(int reconId, string? objectName = null)
+    public async Task<List<string>> GetRecipientsByReconIdAsync(int reconId, string? objectName, bool restricted)
     {
         using var conn = await _db.BuildAndOpenConnectionAsync();
         var result = await conn.QueryAsync<string>(
             "sp_GetMailRecipientsByReconId",
-            new { ReconId = reconId, ObjectName = objectName },
+            new { ReconId = reconId, ObjectName = objectName, Restricted = restricted },
             commandType: System.Data.CommandType.StoredProcedure);
         return result.ToList();
     }

@@ -114,12 +114,42 @@
                 <TextBlock Text="{Binding Version}"
                            Foreground="#B39DDB" FontWeight="SemiBold"
                            FontFamily="Segoe UI" FontSize="13"/>
-                <TextBlock Text="{Binding DatabaseInfo}"
-                           Foreground="#554E6E" FontFamily="Segoe UI" FontSize="11"
-                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
-                <TextBlock Text="{Binding UptimeStr}"
-                           Foreground="#554E6E" FontFamily="Segoe UI" FontSize="11"
-                           TextTrimming="CharacterEllipsis"/>
+                <!-- label | value rows: long server names wrap instead of being cut with "…" -->
+                <Grid Margin="0,4,0,0">
+                    <Grid.Resources>
+                        <Style x:Key="HeaderLabel" TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#8077A0"/>
+                            <Setter Property="FontFamily" Value="Segoe UI"/>
+                            <Setter Property="FontSize" Value="11"/>
+                            <Setter Property="Margin" Value="0,2,10,0"/>
+                        </Style>
+                        <Style x:Key="HeaderValue" TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#E1DCF5"/>
+                            <Setter Property="FontFamily" Value="Segoe UI"/>
+                            <Setter Property="FontSize" Value="11.5"/>
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                            <Setter Property="Margin" Value="0,2,0,0"/>
+                        </Style>
+                    </Grid.Resources>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="БД" Style="{StaticResource HeaderLabel}"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding DatabaseName}" Style="{StaticResource HeaderValue}"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Сервер" Style="{StaticResource HeaderLabel}"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ServerName}" Style="{StaticResource HeaderValue}"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Працює" Style="{StaticResource HeaderLabel}"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding UptimeStr}" Style="{StaticResource HeaderValue}"/>
+                </Grid>
             </StackPanel>
 
             <!-- Integration progress (shown only when integration is running) -->

@@ -22,4 +22,9 @@ public class ModuleConfig
     
     [JsonPropertyName("fastDbBuild")]
     public bool FastDatabaseBuild { get; set; }
+
+    // Set in Recon-Properties ("Пошта — обмежити контент по об'єктах"); read-only here,
+    // SaveModuleConfigAsync never writes it
+    [JsonPropertyName("mailRestrictionEnabled")]
+    public bool MailRestrictionEnabled { get; set; }
 }

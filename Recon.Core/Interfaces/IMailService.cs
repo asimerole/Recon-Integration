@@ -10,9 +10,10 @@ public interface IMailService
     // Mass mailing (for the “Notify everyone” function)
     Task SendToAllAsync(IEnumerable<string> recipients, string subject, string body, IEnumerable<string>? attachments = null);
 
-    Task ProcessBatchAsync(List<FilePair> batch);
-
     void AddToQueue(FilePair pair);
+
+    // DAILY file of one registrator, to the users bound to that object
+    Task SendDailyFileAsync(ServerInfo server, string filePath);
 
     // True while the "Поштова розсилка" module is switched on
     bool IsRunning { get; }

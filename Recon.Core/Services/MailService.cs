@@ -5,6 +5,7 @@ using MailKit.Security;
 using System.IO;
 using MimeKit;
 using Recon.Core.Constants;
+using Recon.Core.Factories;
 using Recon.Core.Interfaces;
 using Recon.Core.Interfaces.Repositories;
 using Recon.Core.Models;
@@ -14,6 +15,12 @@ namespace Recon.Core.Services;
 
 public class MailService : IMailService
 {
+    // Events older than this are not mailed (backlog in Cache when the module is switched on)
+    private static readonly TimeSpan MaxEventAge = TimeSpan.FromDays(3);
+    // Morning report thresholds
+    private static readonly TimeSpan NoConnectionAfter = TimeSpan.FromHours(1);
+    private static readonly TimeSpan NoDailyAfter = TimeSpan.FromHours(24);
+
     private readonly IAppLogRepository _appLog;
     private readonly IFileDataRepository _fileDataRepository;
     private readonly IConfigRepository _configRepository;
@@ -68,6 +75,14 @@ public class MailService : IMailService
         // Module is off: nobody would drain the queue, it would only grow in memory
         if (!IsRunning) return;
 
+        if (pair is { ReconNumber: > 0, Timestamp.Year: > 2000 } && pair.Timestamp < DateTime.Now - MaxEventAge)
+        {
+            // Backlog from Cache after the module was switched on: these events are long known
+            _ = _appLog.LogAsync(LogServiceId.Mail, "mail_skip_old",
+                $"Подія старша за {MaxEventAge.TotalDays:0} дн., не надсилаємо: ReconId={pair.ReconNumber} Object='{pair.Object}' Подія={pair.Timestamp:dd.MM.yyyy HH:mm}");
+            return;
+        }
+
         if (pair is { ReconNumber: > 0, Timestamp.Year: > 2000 })
         {
             _queue.Enqueue(pair);
@@ -108,7 +123,9 @@ public class MailService : IMailService
                     await _appLog.LogAsync(LogServiceId.Mail, "mail_processing",
                         $"Обробка: ReconId={currentReconId} Object='{objectName}' Файлів={miniBatch.Count}");
 
-                    var recipients = await _fileDataRepository.GetRecipientsByReconIdAsync(currentReconId, objectName);
+                    var moduleConfig = await _configRepository.GetModuleConfigAsync();
+                    var recipients = await _fileDataRepository.GetRecipientsByReconIdAsync(
+                        currentReconId, objectName, moduleConfig.MailRestrictionEnabled);
 
                     if (recipients == null || !recipients.Any())
                     {
@@ -163,49 +180,67 @@ public class MailService : IMailService
 
     private async Task SendDailyReportAsync()
     {
-        var rows = await _serverRepository.GetDailyReportAsync(DateTime.Today);
+        var recipients = await _userRepository.GetAdminEmailsAsync();
+        if (!recipients.Any())
+        {
+            await _appLog.LogAsync(LogServiceId.Mail, "daily_report_skip", "Немає активних адміністраторів з увімкненою розсилкою");
+            return;
+        }
+
+        // Only registrators switched on in Properties (sp_GetActiveFtpServers)
+        var enabled = (await _serverRepository.GetAllServersAsync())
+            .Select(s => (s.Unit, s.Substation, s.Object))
+            .ToHashSet();
+        var allRows = await _serverRepository.GetDailyReportAsync(DateTime.Today);
+        var rows = allRows.Where(r => enabled.Contains((r.Unit, r.Substation, r.Object))).ToList();
+        if (rows.Count == 0 && allRows.Count > 0)
+        {
+            // Names in sp_GetDailyReport and sp_GetActiveFtpServers didn't match — better a full report than none
+            await _appLog.LogAsync(LogServiceId.Mail, "daily_report_warn",
+                "Не вдалося зіставити звіт з увімкненими реєстраторами, надсилаємо по всіх");
+            rows = allRows;
+        }
         if (!rows.Any()) return;
 
-        var recipients = await _userRepository.GetActiveUserEmailsAsync();
-        if (!recipients.Any()) return;
-
-        string subject = $"Звіт по стану каналів зв'язку за {DateTime.Today:dd.MM.yyyy}";
-        string body = BuildDailyReportText(rows);
+        var moduleConfig = await _configRepository.GetModuleConfigAsync();
+        string subject = $"Стан серверів і реєстраторів на {DateTime.Now:dd.MM.yyyy HH:mm}";
+        string body = BuildDailyReportText(rows, moduleConfig.IsFtpActive);
 
         await SendToAllAsync(recipients, subject, body);
-        await _appLog.LogAsync(LogServiceId.Mail, "daily_report_sent", $"Отримувачів: {recipients.Count}, Об'єктів: {rows.Count}");
+        await _appLog.LogAsync(LogServiceId.Mail, "daily_report_sent",
+            $"Отримувачі: {string.Join(", ", recipients)}. Реєстраторів: {rows.Count}");
     }
 
-    private static string BuildDailyReportText(List<DailyReportRow> rows)
+    private static string BuildDailyReportText(List<DailyReportRow> rows, bool isFtpActive)
     {
+        DateTime now = DateTime.Now;
+        var noConnection = rows.Where(r => r.LastPing is null || r.LastPing < now - NoConnectionAfter).ToList();
+        var noDaily = rows.Where(r => r.LastDaily is null || r.LastDaily < now - NoDailyAfter).ToList();
+
+        static string Name(DailyReportRow r) => $"{r.Unit} / {r.Substation} / {r.Object}";
+        static string Ago(DateTime? t) => t.HasValue ? $"останній раз {t:dd.MM.yyyy HH:mm}" : "жодного разу";
+
         var sb = new StringBuilder();
-        sb.AppendLine($"ЗВІТ ПО СТАНУ КАНАЛІВ ЗВ'ЯЗКУ за {DateTime.Today:dd.MM.yyyy}");
-        sb.AppendLine(new string('═', 70));
+        sb.AppendLine($"СТАН СЕРВЕРІВ І РЕЄСТРАТОРІВ на {now:dd.MM.yyyy HH:mm}");
+        sb.AppendLine($"Увімкнених реєстраторів: {rows.Count}");
         sb.AppendLine();
-        sb.AppendLine($"{"Підстанція",-20} {"Об'єкт",-20} {"Пінг",-10} {"RECON",-10} {"Зібрано",-8}");
-        sb.AppendLine(new string('─', 70));
 
-        foreach (var r in rows)
+        if (!isFtpActive)
         {
-            string ping = r.HasPingToday ? r.LastPing!.Value.ToString("HH:mm") : "⚠ немає";
-            string recon = r.LastRecon.HasValue && r.LastRecon.Value.Date == DateTime.Today
-                ? r.LastRecon.Value.ToString("HH:mm") : "-";
-            sb.AppendLine($"{r.Substation,-20} {r.Object,-20} {ping,-10} {recon,-10} {r.Collected,-8}");
-        }
-
-        var newlyDead = rows.Where(r => r.IsNewlyDead).ToList();
-        var restored = rows.Where(r => r.IsRestored).ToList();
-
-        if (newlyDead.Any() || restored.Any())
-        {
+            sb.AppendLine("⚠ Модуль «Збір FTP» вимкнено — дані про зв'язок і DAILY можуть бути неактуальні.");
             sb.AppendLine();
-            sb.AppendLine(new string('═', 70));
-            sb.AppendLine("ЗМІНИ ВІДНОСНО ВЧОРА:");
-            foreach (var r in newlyDead)
-                sb.AppendLine($"  ↓ Зникли: {r.Substation}/{r.Object} (вчора була активність)");
-            foreach (var r in restored)
-                sb.AppendLine($"  ↑ Відновились: {r.Substation}/{r.Object}");
         }
+
+        sb.AppendLine($"НЕМАЄ ЗВ'ЯЗКУ (більше {NoConnectionAfter.TotalHours:0} год.): {noConnection.Count}");
+        foreach (var r in noConnection.OrderBy(Name))
+            sb.AppendLine($"  • {Name(r)} — {Ago(r.LastPing)}");
+        if (noConnection.Count == 0) sb.AppendLine("  — усі на зв'язку");
+        sb.AppendLine();
+
+        sb.AppendLine($"НЕМАЄ DAILY (більше {NoDailyAfter.TotalHours:0} год.): {noDaily.Count}");
+        foreach (var r in noDaily.OrderBy(Name))
+            sb.AppendLine($"  • {Name(r)} — {Ago(r.LastDaily)}");
+        if (noDaily.Count == 0) sb.AppendLine("  — від усіх отримано");
 
         sb.AppendLine();
         sb.AppendLine("Це повідомлення сформовано автоматично.");
@@ -256,7 +291,8 @@ public class MailService : IMailService
             {
                 var message = new MimeMessage();
                 message.From.Add(new MailboxAddress(_config.NameSender, _config.EmailSender));
-                message.To.Add(new MailboxAddress("Користувачі", _config.EmailSender));
+                // Recipients go in Bcc; the sender's own mailbox is not added to To (it got every file)
+                message.To.Add(new GroupAddress("Undisclosed recipients"));
                 message.Subject = subject;
                 message.Body = messageBody;
 
@@ -295,37 +331,50 @@ public class MailService : IMailService
     public async Task SendEmailAsync(string toEmail, string subject, string body, IEnumerable<string>? attachments = null)
         => await SendToAllAsync(new[] { toEmail }, subject, body, attachments);
 
-    public async Task ProcessBatchAsync(List<FilePair> batch)
+    public async Task SendDailyFileAsync(ServerInfo server, string filePath)
     {
-        if (batch == null || !batch.Any()) return;
-
-        var groupedFiles = batch
-            .Where(f => f.ReconNumber > 0)
-            .GroupBy(f => f.ReconNumber);
-
-        foreach (var group in groupedFiles)
+        // Snapshot before the first await: integration moves the file out of Cache within seconds
+        string tempCopy = Path.Combine(Path.GetTempPath(), $"recon_{Guid.NewGuid():N}", Path.GetFileName(filePath));
+        try
         {
-            int reconId = group.Key;
-            var filesInGroup = group.ToList();
-            string objectName = filesInGroup.First().Object;
+            Directory.CreateDirectory(Path.GetDirectoryName(tempCopy)!);
+            File.Copy(filePath, tempCopy);
+        }
+        catch (Exception ex)
+        {
+            await _appLog.LogAsync(LogServiceId.Mail, "mail_error", $"DAILY {server.Object}: не вдалося скопіювати файл: {ex.Message}");
+            return;
+        }
 
-            var recipients = await _fileDataRepository.GetRecipientsByReconIdAsync(reconId, objectName);
-            if (recipients == null || !recipients.Any()) continue;
+        try
+        {
+            // sp_GetActiveFtpServers may not return recon_id; the file name always carries it (DAILY353.xxx)
+            int reconId = server.ReconId > 0 ? server.ReconId : BaseFileFactory.Create(filePath)?.ReconNumber ?? 0;
 
-            var freshFiles = filesInGroup
-                .Where(f => f.Timestamp > DateTime.Now.AddDays(-3))
-                .ToList();
-            if (!freshFiles.Any()) continue;
-
-            try
+            var moduleConfig = await _configRepository.GetModuleConfigAsync();
+            var recipients = await _fileDataRepository.GetRecipientsByReconIdAsync(
+                reconId, server.Object, moduleConfig.MailRestrictionEnabled);
+            if (!recipients.Any())
             {
-                await SendEmailForGroupAsync(reconId, objectName, recipients, freshFiles);
-                await Task.Delay(1000);
+                await _appLog.LogAsync(LogServiceId.Mail, "mail_no_recipients",
+                    $"DAILY: немає отримувачів для ReconId={reconId} Object='{server.Object}'");
+                return;
             }
-            catch (Exception ex)
-            {
-                await _appLog.LogAsync(LogServiceId.Mail, "mail_error", $"ProcessBatch для {reconId}: {ex.Message}");
-            }
+
+            string subject = $"Суточний файл: {server.Substation} - {server.Object} | {DateTime.Today:dd.MM.yyyy}";
+            string body = $"Прийшов суточний файл.\n\nОб'єкт: {server.Substation} / {server.Object}\n\nЦе повідомлення сформовано автоматично.";
+
+            await SendToAllAsync(recipients, subject, body, new[] { tempCopy });
+            await _appLog.LogAsync(LogServiceId.Mail, "mail_sent",
+                $"DAILY {server.Substation}/{server.Object} → {string.Join(", ", recipients)}");
+        }
+        catch (Exception ex)
+        {
+            await _appLog.LogAsync(LogServiceId.Mail, "mail_error", $"DAILY {server.Object}: {ex.Message}");
+        }
+        finally
+        {
+            try { Directory.Delete(Path.GetDirectoryName(tempCopy)!, recursive: true); } catch { }
         }
     }
 
@@ -382,7 +431,8 @@ public class MailService : IMailService
             {
                 var message = new MimeMessage();
                 message.From.Add(new MailboxAddress(_config.NameSender, _config.EmailSender));
-                message.To.Add(new MailboxAddress("Користувачі", _config.EmailSender));
+                // Recipients go in Bcc; the sender's own mailbox is not added to To (it got every file)
+                message.To.Add(new GroupAddress("Undisclosed recipients"));
                 message.Subject = subject;
                 message.Body = messageBody;
 

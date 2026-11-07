@@ -35,11 +35,22 @@
                                     <ContentPresenter x:Name="ContentSite"
                                                       Content="{TemplateBinding SelectionBoxItem}"
                                                       ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      IsHitTestVisible="False"
                                                       Margin="8,0,28,0" VerticalAlignment="Center"/>
                                     <TextBlock Text="▾" Foreground="#7C6AA6" HorizontalAlignment="Right"
+                                               IsHitTestVisible="False"
                                                VerticalAlignment="Center" Margin="0,0,8,0" FontSize="10"/>
                                 </Grid>
                             </Border>
+                            <!-- Without a toggle nothing ever sets IsDropDownOpen, so the list never opened -->
+                            <ToggleButton Focusable="False" ClickMode="Press" Cursor="Hand"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent"/>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
                             <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}"
                                    AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
                                 <Border Background="#1A1830" BorderBrush="#3A3360" BorderThickness="1"
@@ -112,6 +123,42 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <Style x:Key="FilterDatePicker" TargetType="DatePicker">
+            <Setter Property="Background" Value="#1E1830"/>
+            <Setter Property="Foreground" Value="#C8C0E0"/>
+            <Setter Property="BorderBrush" Value="#3A3360"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6,0"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Width" Value="125"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="SelectedDateFormat" Value="Short"/>
+            <Style.Resources>
+                <!-- Default text part is white with a "Select a date" watermark -->
+                <Style TargetType="DatePickerTextBox">
+                    <Setter Property="Foreground" Value="#C8C0E0"/>
+                    <Setter Property="CaretBrush" Value="#C8C0E0"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="DatePickerTextBox">
+                                <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Margin="2,0"/>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Style.Resources>
+        </Style>
+
+        <Style x:Key="FilterLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#8077A0"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
         </Style>
 
         <Style x:Key="ToolButton" TargetType="Button">
@@ -187,7 +234,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="42"/>
-            <RowDefinition Height="52"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="38"/>
         </Grid.RowDefinitions>
@@ -210,39 +257,46 @@
 
         <!-- Filter bar -->
         <Border Grid.Row="1" Background="#150F28" BorderBrush="#2A2240" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
+            <!-- WrapPanel: on a narrow window the dates move to a second line instead of being cut off -->
+            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,6">
 
-                <ComboBox Width="140" Margin="0,0,8,0"
+                <ComboBox Width="140" Margin="0,4,8,4"
                           Style="{StaticResource FilterComboBox}"
                           ItemsSource="{Binding ServiceOptions}"
                           DisplayMemberPath="Name"
                           SelectedValuePath="Id"
                           SelectedValue="{Binding SelectedServiceId}"/>
 
-                <TextBox Width="220" Margin="0,0,8,0"
+                <TextBox Width="220" Margin="0,4,12,4"
                          Style="{StaticResource FilterTextBox}"
-                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}">
-                    <TextBox.Resources>
-                        <Style TargetType="Border">
-                            <Setter Property="CornerRadius" Value="4"/>
-                        </Style>
-                    </TextBox.Resources>
-                </TextBox>
+                         ToolTip="Пошук по всіх полях. Кілька слів через пробіл — мають бути всі"
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
 
-                <Button Content="↻  Оновити" Margin="0,0,8,0"
+                <StackPanel Orientation="Horizontal" Margin="0,4,12,4">
+                    <TextBlock Text="з" Style="{StaticResource FilterLabel}"/>
+                    <DatePicker Style="{StaticResource FilterDatePicker}" SelectedDate="{Binding DateFrom}" Margin="0,0,8,0"/>
+                    <TextBlock Text="по" Style="{StaticResource FilterLabel}"/>
+                    <DatePicker Style="{StaticResource FilterDatePicker}" SelectedDate="{Binding DateTo}"/>
+                </StackPanel>
+
+                <Button Content="✕  Скинути" Margin="0,4,8,4"
+                        Style="{StaticResource ToolButton}"
+                        Command="{Binding ResetFiltersCommand}"/>
+
+                <Button Content="↻  Оновити" Margin="0,4,8,4"
                         Style="{StaticResource ToolButton}"
                         Command="{Binding RefreshCommand}"/>
 
-                <CheckBox VerticalAlignment="Center" Margin="4,0,0,0"
+                <CheckBox VerticalAlignment="Center" Margin="4,4,0,4"
                           IsChecked="{Binding AutoRefresh}"
-                          Foreground="#6B6280" FontFamily="Segoe UI" FontSize="12"
                           Cursor="Hand">
                     <CheckBox.Content>
-                        <TextBlock Text="Авто-оновлення (10 с)" Foreground="#6B6280"/>
+                        <TextBlock Text="Авто-оновлення (10 с)" Foreground="#8077A0"
+                                   FontFamily="Segoe UI" FontSize="12"/>
                     </CheckBox.Content>
                 </CheckBox>
 
-            </StackPanel>
+            </WrapPanel>
         </Border>
 
         <!-- Log DataGrid -->
@@ -371,7 +425,7 @@
         <Border Grid.Row="3" Background="#0E0C1A" BorderBrush="#2A2240" BorderThickness="0,1,0,0">
             <Grid Margin="14,0">
                 <TextBlock Text="{Binding StatusText}"
-                           Foreground="#554E6E" FontFamily="Segoe UI" FontSize="11"
+                           Foreground="#8077A0" FontFamily="Segoe UI" FontSize="11"
                            VerticalAlignment="Center"/>
                 <Button Content="Очистити старі записи (залишити 20 000)"
                         HorizontalAlignment="Right"

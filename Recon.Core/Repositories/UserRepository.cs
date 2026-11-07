@@ -68,6 +68,23 @@ public class UserRepository : IUserRepository
         }
     }
 
+    public async Task<List<string>> GetAdminEmailsAsync()
+    {
+        try
+        {
+            using var conn = await _db.BuildAndOpenConnectionAsync();
+            var result = await conn.QueryAsync<string>(
+                "sp_GetAdminMailRecipients",
+                commandType: System.Data.CommandType.StoredProcedure);
+            return result.ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Помилка отримання email адміністраторів");
+            return [];
+        }
+    }
+
     public async Task<Dictionary<string, List<string>>> GetUsersGroupedBySubstationAsync()
     {
         const string sql = @"

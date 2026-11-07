@@ -19,7 +19,6 @@ public class FtpService : IFtpService
     private readonly IAppLogRepository _appLog;
     private readonly IStatisticsService _statsService;
     private readonly IMailService _mailService;
-    private readonly IUserRepository _userRepository;
 
     private string _ftpCacheDir = string.Empty;
 
@@ -27,15 +26,13 @@ public class FtpService : IFtpService
     private Task? _workingTask;
 
     public FtpService(IConfigRepository configRepository, IServerRepository serverRepository,
-        IAppLogRepository appLog, IStatisticsService statsService,
-        IMailService mailService, IUserRepository userRepository)
+        IAppLogRepository appLog, IStatisticsService statsService, IMailService mailService)
     {
         _configRepository = configRepository;
         _serverRepository = serverRepository;
         _appLog = appLog;
         _statsService = statsService;
         _mailService = mailService;
-        _userRepository = userRepository;
     }
     
     public void StartFTP()
@@ -280,13 +277,8 @@ public class FtpService : IFtpService
             bool shouldSend = await _serverRepository.TryMarkDailySentAsync(server.StructId);
             if (!shouldSend) return;
 
-            var recipients = await _userRepository.GetActiveUserEmailsAsync();
-            if (!recipients.Any()) return;
-
-            string subject = $"Суточний файл: {server.Substation} - {server.Object} | {DateTime.Today:dd.MM.yyyy}";
-            string body = $"Прийшов суточний файл.\n\nОб'єкт: {server.Substation} / {server.Object}\n\nЦе повідомлення сформовано автоматично.";
-
-            _ = _mailService.SendToAllAsync(recipients, subject, body, new[] { filePath });
+            // Not awaited: the file is snapshotted synchronously inside, sending runs in background
+            _ = _mailService.SendDailyFileAsync(server, filePath);
         }
         catch (Exception ex)
         {
