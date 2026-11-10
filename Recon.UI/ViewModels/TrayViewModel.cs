@@ -1,15 +1,15 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Recon.Core.Infrastructure;
-using Recon.Core.Interfaces;
-using Recon.Core.Interfaces.Repositories;
-using Recon.Core.Options;
-using Recon.Core.Services;
+using Recon.Core.Infrastructure.Db;
+using Recon.Core.Application.Interfaces;
+using Recon.Core.Application.Interfaces.Repositories;
+using Recon.Core.Application.Options;
+using Recon.Core.Application.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Recon.UI;
 
@@ -155,8 +155,22 @@ public partial class TrayViewModel : ObservableObject
             return;
         }
 
-        await _mailService.SendToAllAsync(users, "Нове повідомлення від адміністратора", message);
-        MessageBox.Show("Повідомлення успішно розіслані!");
+        var result = await _mailService.SendToAllAsync(users, "Нове повідомлення від адміністратора", message);
+
+        // Used to say "success" even when SMTP was down
+        var report = new System.Text.StringBuilder();
+        report.AppendLine(result.Success
+            ? $"Надіслано: {result.Sent} з {users.Count}."
+            : $"Не вдалося надіслати: {result.Error}");
+        if (result.Rejected.Count > 0)
+            report.AppendLine().AppendLine("Сервер відхилив:").AppendLine(string.Join("\n", result.Rejected));
+        if (result.Invalid.Count > 0)
+            report.AppendLine().AppendLine("Не email (пропущено):").AppendLine(string.Join("\n", result.Invalid));
+
+        MessageBox.Show(report.ToString(), "Повідомити всіх", MessageBoxButton.OK,
+            result.Success && result.Rejected.Count == 0 && result.Invalid.Count == 0
+                ? MessageBoxImage.Information
+                : MessageBoxImage.Warning);
     }
 
     [RelayCommand]
@@ -211,7 +225,7 @@ public partial class TrayViewModel : ObservableObject
         if (IsFtpActive) _ftpService.StartFTP();
         if (IsMailActive) _mailService.StartSendingLoop();
 
-        _oneDriveService.StartCleanupScheduler();
+        if (IsOneDriveActive) _oneDriveService.Start();
     }
 
     private IProgress<int> CreateProgressReporter() =>
@@ -267,16 +281,18 @@ public partial class TrayViewModel : ObservableObject
 
     partial void OnIsFtpActiveChanged(bool value)
     {
-        if (_isSyncingWithDb || _isInitializing) return;
-        _ = Task.Run(SaveCurrentStateAsync);
+        if (_isInitializing) return;
+        // Change came from the DB (Properties): the flag is already saved there, but the module must still react
+        if (!_isSyncingWithDb) _ = Task.Run(SaveCurrentStateAsync);
         if (value) _ftpService.StartFTP();
         else _ftpService.StopFTP();
     }
 
     partial void OnIsIntegrationActiveChanged(bool value)
     {
-        if (_isSyncingWithDb || _isInitializing) return;
-        _ = Task.Run(SaveCurrentStateAsync);
+        if (_isInitializing) return;
+        // Change came from the DB (Properties): the flag is already saved there, but the module must still react
+        if (!_isSyncingWithDb) _ = Task.Run(SaveCurrentStateAsync);
         if (value)
         {
             var reporter = CreateProgressReporter();
@@ -291,15 +307,19 @@ public partial class TrayViewModel : ObservableObject
 
     partial void OnIsMailActiveChanged(bool value)
     {
-        if (_isSyncingWithDb || _isInitializing) return;
-        _ = Task.Run(SaveCurrentStateAsync);
+        if (_isInitializing) return;
+        // Change came from the DB (Properties): the flag is already saved there, but the module must still react
+        if (!_isSyncingWithDb) _ = Task.Run(SaveCurrentStateAsync);
         if (value) _mailService.StartSendingLoop();
         else _mailService.StopSendingLoop();
     }
 
     partial void OnIsOneDriveActiveChanged(bool value)
     {
-        if (_isSyncingWithDb || _isInitializing) return;
-        _ = Task.Run(SaveCurrentStateAsync);
+        if (_isInitializing) return;
+        // Change came from the DB (Properties): the flag is already saved there, but the module must still react
+        if (!_isSyncingWithDb) _ = Task.Run(SaveCurrentStateAsync);
+        if (value) _oneDriveService.Start();
+        else _oneDriveService.Stop();
     }
 }

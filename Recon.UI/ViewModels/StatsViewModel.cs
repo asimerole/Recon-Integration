@@ -1,9 +1,9 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Threading;
-using Recon.Core.Enums;
-using Recon.Core.Interfaces;
-using Recon.Core.Models;
+using Recon.Core.Domain.Enums;
+using Recon.Core.Application.Interfaces;
+using Recon.Core.Domain.Models;
 
 namespace Recon.UI.ViewModels;
 

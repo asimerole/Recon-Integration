@@ -1,9 +1,9 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Recon.Core.Interfaces.Repositories;
-using Recon.Core.Models;
+using Recon.Core.Application.Interfaces.Repositories;
+using Recon.Core.Domain.Models;
 
 namespace Recon.UI.ViewModels;
 

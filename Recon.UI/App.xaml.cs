@@ -1,14 +1,15 @@
-using System.IO;
+﻿using System.IO;
 using System.Threading;
 using System.Windows;
 using Hardcodet.Wpf.TaskbarNotification;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Recon.Core.Infrastructure;
-using Recon.Core.Interfaces;
-using Recon.Core.Interfaces.Repositories;
-using Recon.Core.Repositories;
-using Recon.Core.Services;
+using Recon.Core.Infrastructure.Crypto;
+using Recon.Core.Infrastructure.Db;
+using Recon.Core.Application.Interfaces;
+using Recon.Core.Application.Interfaces.Repositories;
+using Recon.Core.Infrastructure.Repositories;
+using Recon.Core.Application.Services;
 using Recon.UI.ViewModels;
 using Serilog;
 using Microsoft.Data.SqlClient;
@@ -56,6 +57,7 @@ public partial class App : Application
                 services.AddSingleton<IFileDataRepository, FileDataRepository>();
                 services.AddSingleton<IServerRepository, ServerRepository>();
                 services.AddSingleton<IAppLogRepository, AppLogRepository>();
+                services.AddSingleton<IMailOutboxRepository, MailOutboxRepository>();
 
                 // Services
                 services.AddSingleton<IAuthService, AuthService>();
@@ -67,7 +69,6 @@ public partial class App : Application
                 services.AddSingleton<IConfigService, ConfigService>();
                 services.AddSingleton<ConfigMonitorService>();
                 services.AddSingleton<IStatisticsService, StatisticsService>();
-                services.AddSingleton<BrokenFileService>();
 
                 // UI
                 services.AddTransient<AuthWindow>();

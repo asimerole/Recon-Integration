@@ -1,7 +1,7 @@
-using System.Windows;
+﻿using System.Windows;
 using System.IO;
 using System.Windows.Input;
-using Recon.Core.Interfaces;
+using Recon.Core.Application.Interfaces;
 using System.Windows.Forms;
 using MessageBox = System.Windows.Forms.MessageBox;
 

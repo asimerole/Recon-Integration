@@ -1,4 +1,3 @@
--- Recipients of the morning status report: active admins with mailing switched on
 CREATE OR ALTER PROCEDURE sp_GetAdminMailRecipients
 AS
 BEGIN

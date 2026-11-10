@@ -1,0 +1,14 @@
+﻿using Recon.Core.Application.Options;
+
+namespace Recon.Core.Application.Interfaces.Repositories;
+
+public interface IConfigRepository
+{
+    Task<ModuleConfig> GetModuleConfigAsync();
+    Task SaveModuleConfigAsync(ModuleConfig config);
+    Task<MailServerConfig> GetMailServerConfigAsync();
+    Task<OneDriveConfig> GetOneDriveConfigAsync();
+    Task<string> GetRootFolderAsync();
+    Task<string> GetWinrecPathAsync();
+    Task<int> GetFeedingTimeAsync();
+}
